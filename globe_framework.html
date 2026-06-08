@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#07111f;height:100vh;overflow:hidden;display:flex;flex-direction:column;font-family:sans-serif}
+#wrap{flex:1;position:relative;min-height:0}
+canvas{display:block;width:100%;height:100%;cursor:grab}
+canvas:active{cursor:grabbing}
+#ui{background:#0d1a2b;border-top:1px solid #1a2d42;padding:10px 14px;flex-shrink:0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.row:last-child{margin-bottom:0}
+input[type=text],input:not([type]){background:#0f1e30;border:1px solid #1e3550;border-radius:6px;padding:6px 10px;color:#c8dff0;font-size:13px;outline:none;flex:1;min-width:120px}
+input[type=text]:focus,input:not([type]):focus{border-color:#3a7abf}
+input::placeholder{color:#2a4a6a}
+button{background:#0f2a45;border:1px solid #1e4a72;border-radius:6px;padding:6px 14px;color:#5ab0ff;font-size:13px;cursor:pointer}
+button:hover{background:#143550}
+.danger{background:#2a0f0f!important;border-color:#5a1e1e!important;color:#ff7e7e!important}
+#progress-wrap{background:#0f1e30;border-radius:4px;height:6px;flex:1;min-width:80px;overflow:hidden}
+#progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#1a5fa0,#4aacff);border-radius:4px;transition:width 0.4s}
+#status{font-size:12px;color:#5ab0ff;white-space:nowrap}
+#hist-panel{display:none;max-height:150px;overflow-y:auto;margin-bottom:6px;border:1px solid #1a2d42;border-radius:6px;background:#09131f}
+.hist-row{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #111f2e;font-size:12px}
+.hist-row:last-child{border-bottom:none}
+#ac{position:absolute;background:#0d1a2b;border:1px solid #1e3550;border-radius:6px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px #000c;display:none}
+.ac-item{padding:7px 11px;font-size:13px;cursor:pointer;border-bottom:1px solid #111f2e;color:#8ab8d8}
+.ac-item:hover{background:#0f2035;color:#4aacff}
+.ac-item:last-child{border-bottom:none}
+select{background:#0f1e30;border:1px solid #1e3550;color:#5ab0ff;border-radius:4px;font-size:11px;padding:2px 4px}
+#hint{font-size:11px;color:#1a3a5a;text-align:center;margin-top:4px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="ac"></div>
+</div>
+<div id="ui">
+  <div id="hist-panel"><div id="hist-list"></div></div>
+  <div class="row">
+    <span style="font-size:12px;color:#2a5a8a">from</span>
+    <input id="inp-from" placeholder="departure..." autocomplete="off"/>
+    <span style="font-size:12px;color:#2a5a8a">to</span>
+    <input id="inp-to" placeholder="destination..." autocomplete="off"/>
+  </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <label style="font-size:12px;color:#2a5a8a;display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
+      pomodoro <input type="checkbox" id="chk-pomo" style="cursor:pointer;margin:0"/>
+    </label>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="btn-fly">fly ✈</button>
+      <button id="btn-hist">history</button>
+      <button class="danger" id="btn-stop" style="display:none" onclick="stopFlight()">stop</button>
+    </div>
+  </div>
+  <div class="row">
+    <div id="progress-wrap"><div id="progress-bar"></div></div>
+    <span id="status">ready</span>
+    <span style="font-size:11px;color:#2a5a8a">speed:</span>
+    <select id="speed-sel">
+      <option value="1">1x</option>
+      <option value="2">2x</option>
+      <option value="5">5x</option>
+      <option value="10">10x</option>
+      <option value="100">100x</option>
+      <option value="10000">10000x</option>
+    </select>
+  </div>
+  <div id="hint">drag to rotate · scroll to zoom</div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H, R;
+function resize() {
+  W = canvas.width  = canvas.offsetWidth;
+  H = canvas.height = canvas.offsetHeight;
+  R = Math.min(W, H) * 0.42;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let rotX = 0.3, rotY = 0, vX = 0, vY = 0;
+let dragging = false, mx = 0, my = 0;
+
+function ll2xyz(lat, lng) {
+  const la = lat * Math.PI / 180, lo = lng * Math.PI / 180;
+  return [Math.cos(la)*Math.cos(-lo), Math.sin(la), Math.cos(la)*Math.sin(-lo)];
+}
+function project(x, y, z) {
+  const x1 =  x*Math.cos(rotY) + z*Math.sin(rotY);
+  const z1 = -x*Math.sin(rotY) + z*Math.cos(rotY);
+  const y2 =  y*Math.cos(rotX) - z1*Math.sin(rotX);
+  const z2 =  y*Math.sin(rotX) + z1*Math.cos(rotX);
+  return { sx: W/2 + x1*R, sy: H/2 - y2*R, vis: z2 > 0 };
+}
+function projectLL(lat, lng) { return project(...ll2xyz(lat, lng)); }
+function slerp(a, b, t) {
+  let d = Math.max(-1, Math.min(1, a[0]*b[0]+a[1]*b[1]+a[2]*b[2]));
+  const om = Math.acos(d);
+  if (om < 1e-6) return a;
+  const s = 1/Math.sin(om);
+  return a.map((v,i) => s*(Math.sin((1-t)*om)*v + Math.sin(t*om)*b[i]));
+}
+function haversine(la1, lo1, la2, lo2) {
+  const Rk = 6371, D = Math.PI/180;
+  const dLa = (la2-la1)*D, dLo = (lo2-lo1)*D;
+  const a = Math.sin(dLa/2)**2 + Math.cos(la1*D)*Math.cos(la2*D)*Math.sin(dLo/2)**2;
+  return 2*Rk*Math.asin(Math.sqrt(a));
+}
+function formatDur(hours) {
+  const totalSec = Math.round(hours * 3600);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return h + 'h ' + String(m).padStart(2,'0') + 'm';
+  if (m > 0) return m + 'm ' + String(s).padStart(2,'0') + 's';
+  return s + 's';
+}
+function formatTime(ms) {
+  const t = Math.ceil(ms/1000);
+  const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), s = t%60;
+  if (h > 0) return h+'h '+String(m).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s';
+  return m+'m '+String(s).padStart(2,'0')+'s';
+}
+
+canvas.addEventListener('mousedown', e => { dragging=true; mx=e.clientX; my=e.clientY; vX=vY=0; });
+window.addEventListener('mouseup', () => dragging=false);
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  vY=(e.clientX-mx)*0.005; vX=(e.clientY-my)*0.005;
+  rotY+=vY; rotX+=vX;
+  rotX=Math.max(-1.4,Math.min(1.4,rotX));
+  mx=e.clientX; my=e.clientY;
+});
+canvas.addEventListener('wheel', e => {
+  R=Math.max(80,Math.min(window.innerHeight*0.9,R-e.deltaY*0.3));
+  e.preventDefault();
+},{passive:false});
+
+const CITIES = [
+  {n:'london',lat:51.51,lng:-0.13},{n:'paris',lat:48.86,lng:2.35},
+  {n:'new york',lat:40.71,lng:-74.01},{n:'tokyo',lat:35.69,lng:139.69},
+  {n:'sydney',lat:-33.87,lng:151.21},{n:'dubai',lat:25.20,lng:55.27},
+  {n:'singapore',lat:1.35,lng:103.82},{n:'são paulo',lat:-23.55,lng:-46.63},
+  {n:'cairo',lat:30.04,lng:31.24},{n:'mumbai',lat:19.08,lng:72.88},
+  {n:'los angeles',lat:34.05,lng:-118.24},{n:'nairobi',lat:-1.29,lng:36.82},
+  {n:'moscow',lat:55.75,lng:37.62},{n:'beijing',lat:39.90,lng:116.41},
+  {n:'cape town',lat:-33.92,lng:18.42},{n:'mexico city',lat:19.43,lng:-99.13},
+  {n:'shanghai',lat:31.23,lng:121.47},{n:'delhi',lat:28.61,lng:77.21},
+  {n:'istanbul',lat:41.01,lng:28.95},{n:'osaka',lat:34.69,lng:135.50},
+  {n:'karachi',lat:24.86,lng:67.01},{n:'dhaka',lat:23.72,lng:90.41},
+  {n:'bangkok',lat:13.76,lng:100.50},{n:'kolkata',lat:22.57,lng:88.36},
+  {n:'lagos',lat:6.52,lng:3.38},{n:'kinshasa',lat:-4.32,lng:15.32},
+  {n:'jakarta',lat:-6.21,lng:106.85},{n:'seoul',lat:37.57,lng:126.98},
+  {n:'taipei',lat:25.03,lng:121.56},{n:'hong kong',lat:22.32,lng:114.17},
+  {n:'kuala lumpur',lat:3.14,lng:101.69},{n:'manila',lat:14.60,lng:120.98},
+  {n:'bogotá',lat:4.71,lng:-74.07},{n:'lima',lat:-12.05,lng:-77.04},
+  {n:'santiago',lat:-33.45,lng:-70.67},{n:'buenos aires',lat:-34.60,lng:-58.38},
+  {n:'johannesburg',lat:-26.20,lng:28.04},{n:'casablanca',lat:33.59,lng:-7.62},
+  {n:'accra',lat:5.56,lng:-0.20},{n:'addis ababa',lat:9.03,lng:38.74},
+  {n:'riyadh',lat:24.69,lng:46.72},{n:'tehran',lat:35.69,lng:51.39},
+  {n:'baghdad',lat:33.34,lng:44.40},{n:'lahore',lat:31.55,lng:74.34},
+  {n:'chicago',lat:41.88,lng:-87.63},{n:'toronto',lat:43.65,lng:-79.38},
+  {n:'miami',lat:25.77,lng:-80.19},{n:'vancouver',lat:49.25,lng:-123.12},
+  {n:'amsterdam',lat:52.37,lng:4.90},{n:'berlin',lat:52.52,lng:13.40},
+  {n:'madrid',lat:40.42,lng:-3.70},{n:'rome',lat:41.90,lng:12.50},
+  {n:'lisbon',lat:38.72,lng:-9.14},{n:'vienna',lat:48.21,lng:16.37},
+  {n:'warsaw',lat:52.23,lng:21.01},{n:'stockholm',lat:59.33,lng:18.07},
+  {n:'auckland',lat:-36.86,lng:174.76},{n:'melbourne',lat:-37.81,lng:144.96},
+  {n:'houston',lat:29.76,lng:-95.37},{n:'anchorage',lat:61.22,lng:-149.90},
+  {n:'havana',lat:23.14,lng:-82.36},{n:'caracas',lat:10.48,lng:-66.88},
+  {n:'la paz',lat:-16.50,lng:-68.15},{n:'dakar',lat:14.72,lng:-17.47},
+  {n:'almaty',lat:43.22,lng:76.85},{n:'tashkent',lat:41.30,lng:69.24},
+  {n:'ulaanbaatar',lat:47.91,lng:106.88},{n:'krasnoyarsk',lat:56.01,lng:92.87},
+  {n:'perth',lat:-31.95,lng:115.86},{n:'jaffna',lat:9.67,lng:80.02},
+];
+
+let geo = null;
+const topoScript = document.createElement('script');
+topoScript.src = 'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js';
+topoScript.onload = () => {
+  fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+    .then(r => r.json()).then(t => {
+      geo = { type:'FeatureCollection', features: topojson.feature(t, t.objects.countries).features };
+    });
+};
+document.head.appendChild(topoScript);
+
+// ── Audio ─────────────────────────────────────────────────
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function playChime(type) {
+  try {
+    const ac = getAudioCtx();
+    let notes;
+    if      (type === 'takeoff') notes = [{f:330,d:0.3},{f:392,d:0.3},{f:523,d:0.5}];
+    else if (type === 'halfway') notes = [{f:440,d:0.4},{f:554,d:0.4},{f:659,d:0.4},{f:880,d:0.6}];
+    else if (type === 'landing') notes = [{f:523,d:0.25},{f:523,d:0.25},{f:523,d:0.25},{f:659,d:0.5},{f:523,d:0.5},{f:659,d:0.5},{f:784,d:0.8}];
+    else if (type === 'break')   notes = [{f:523,d:0.5},{f:392,d:0.5}];
+    else if (type === 'resume')  notes = [{f:392,d:0.5},{f:523,d:0.5},{f:659,d:0.5}];
+    let t = ac.currentTime;
+    notes.forEach(({f,d}) => {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = type === 'landing' ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(f, t);
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + d);
+      osc.start(t); osc.stop(t + d);
+      t += d * 0.85;
+    });
+  } catch(e) {}
+}
+
+// ── Pomodoro ──────────────────────────────────────────────
+const POMO_FOCUS = 50 * 60 * 1000;
+const POMO_BREAK = 10 * 60 * 1000;
+let pomo = null;
+
+function initPomo() {
+  pomo = { onBreak: false, phaseStart: Date.now() };
+}
+function tickPomo() {
+  if (!pomo || !flight) return;
+  const elapsed = Date.now() - pomo.phaseStart;
+  const limit = pomo.onBreak ? POMO_BREAK : POMO_FOCUS;
+  if (elapsed >= limit) {
+    pomo.onBreak = !pomo.onBreak;
+    pomo.phaseStart = Date.now();
+    if (pomo.onBreak) {
+      playChime('break');
+      banner.next = 'break time. step away 🧘';
+      banner.fading = true;
+    } else {
+      playChime('resume');
+      banner.next = getBannerMsg(flight ? flight.progress : 0);
+      banner.fading = true;
+    }
+  }
+}
+
+// ── Banner ────────────────────────────────────────────────
+const MESSAGES = [
+  {threshold:0,    text:"wheels up — lock in 👀"},
+  {threshold:0.25, text:"stay focused. 🫡"},
+  {threshold:0.5,  text:"halfway there. ⏳"},
+  {threshold:0.75, text:"almost done... 🥰"},
+  {threshold:1,    text:"landed. great session 🎉"},
+];
+let banner = { current:"enter a route to begin", next:null, opacity:1, fading:false };
+
+function getBannerMsg(p) {
+  let msg = MESSAGES[0].text;
+  for (const m of MESSAGES) { if (p >= m.threshold) msg = m.text; }
+  return msg;
+}
+function updateBanner(p) {
+  if (pomo && pomo.onBreak) return;
+  const msg = getBannerMsg(p);
+  if (msg !== banner.current && msg !== banner.next) {
+    banner.next = msg; banner.fading = true;
+  }
+}
+function resetBanner() {
+  banner.current="enter a route to begin"; banner.next=null; banner.fading=false; banner.opacity=1;
+}
+
+// ── Flight ────────────────────────────────────────────────
+let flight = null, flightTimer = null;
+
+function startFlight(from, to) {
+  stopFlight();
+  const km = haversine(from.lat,from.lng,to.lat,to.lng);
+  const totalMs = (km/900)*3600000;
+  flight = { from, to, km, totalMs, startTime:Date.now(), progress:0, halfwayChimed:false };
+  const usePomo = document.getElementById('chk-pomo').checked;
+  document.getElementById('chk-pomo').disabled = true;
+  if (usePomo) initPomo(); else pomo = null;
+  document.getElementById('btn-stop').style.display = '';
+  updateBanner(0);
+  playChime('takeoff');
+  function tick() {
+    const speed = parseFloat(document.getElementById('speed-sel').value);
+    const elapsed = (Date.now()-flight.startTime)*speed;
+    flight.progress = Math.min(1, elapsed/flight.totalMs);
+    const pct = (flight.progress*100).toFixed(1);
+    const flown = Math.round(flight.progress*km);
+    document.getElementById('progress-bar').style.width = pct+'%';
+    document.getElementById('status').textContent = pct+'% · '+flown+' / '+Math.round(km)+' km';
+    updateBanner(flight.progress);
+    tickPomo();
+    if (flight.progress >= 0.5 && !flight.halfwayChimed) {
+      flight.halfwayChimed = true;
+      playChime('halfway');
+    }
+    if (flight.progress >= 1) {
+      clearInterval(flightTimer);
+      saveToHistory(from,to,km,km/900);
+      playChime('landing');
+      document.getElementById('status').textContent = 'landed! '+Math.round(km)+' km';
+      document.getElementById('btn-stop').style.display = 'none';
+    }
+  }
+  tick();
+  flightTimer = setInterval(tick, 500);
+}
+
+function stopFlight() {
+  if (flightTimer) clearInterval(flightTimer);
+  flightTimer=null; flight=null; pomo=null;
+  document.getElementById('chk-pomo').disabled = false;
+  resetBanner();
+  document.getElementById('progress-bar').style.width='0';
+  document.getElementById('status').textContent='ready';
+  document.getElementById('btn-stop').style.display='none';
+}
+
+document.getElementById('btn-fly').addEventListener('click', () => {
+  const fn = document.getElementById('inp-from').value.trim();
+  const tn = document.getElementById('inp-to').value.trim();
+  const from = CITIES.find(c => c.n.toLowerCase()===fn.toLowerCase());
+  const to   = CITIES.find(c => c.n.toLowerCase()===tn.toLowerCase());
+  if (!from) { alert('departure city not found'); return; }
+  if (!to)   { alert('destination city not found'); return; }
+  if (from.n===to.n) { alert('pick two different cities'); return; }
+  startFlight(from,to);
+});
+
+// ── Supabase ──────────────────────────────────────────────
+const SB_URL = 'https://dwzvbiuylptzeoohwovt.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3enZiaXV5bHB0emVvb2h3b3Z0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5NDg1MzgsImV4cCI6MjA5NjUyNDUzOH0.TUr2vpvxz2yokDuq-VZctLZ1sdYSSP-JE7l9LHe1xy0';
+
+async function sbFetch(method, body) {
+  const res = await fetch(SB_URL + '/rest/v1/sessions?id=eq.1', {
+    method,
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': method === 'PATCH' ? 'return=minimal' : 'return=representation'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  return method === 'PATCH' ? null : res.json();
+}
+
+async function loadHistory() {
+  try {
+    const rows = await sbFetch('GET');
+    const data = rows?.[0]?.data;
+    if (Array.isArray(data)) return data;
+  } catch(e) {}
+  // fallback to localStorage
+  try { return JSON.parse(localStorage.getItem('fgt_hist') || '[]'); } catch(e) { return []; }
+}
+
+async function saveHistory(entries) {
+  try {
+    await sbFetch('PATCH', { data: entries });
+  } catch(e) {}
+  // also keep localStorage as backup
+  localStorage.setItem('fgt_hist', JSON.stringify(entries));
+}
+async function saveToHistory(from, to, km, hours) {
+  const speed = parseFloat(document.getElementById('speed-sel').value);
+  const h = await loadHistory();
+  h.unshift({
+    from:from.n, to:to.n, km:Math.round(km),
+    dur:formatDur(hours),
+    realDur: speed>1 ? formatDur(hours/speed) : null,
+    date:new Date().toLocaleDateString()
+  });
+  if (h.length>50) h.length=50;
+  await saveHistory(h);
+}
+
+async function deleteHistory(i) {
+  const h = await loadHistory();
+  h.splice(i,1);
+  await saveHistory(h);
+  renderHistory();
+}
+
+async function renderHistory() {
+  const h = await loadHistory();
+  const list = document.getElementById('hist-list');
+  if (!h.length) {
+    list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:#2a5a8a">no completed flights yet.</div>';
+    return;
+  }
+  list.innerHTML = h.map((f,i) =>
+    '<div class="hist-row">'+
+      '<span style="color:#7ec8ff">'+f.from+' → '+f.to+'</span>'+
+      '<span style="color:#2a6a9a;margin:0 10px">'+f.km+' km · '+f.dur+(f.realDur?' · '+f.realDur+' real':'')+'</span>'+
+      '<span style="color:#2a5a8a;margin-right:10px">'+f.date+'</span>'+
+      '<span onclick="deleteHistory('+i+')" style="color:#5a1e1e;cursor:pointer;font-size:15px" onmouseover="this.style.color=\'#ff7e7e\'" onmouseout="this.style.color=\'#5a1e1e\'">✕</span>'+
+    '</div>'
+  ).join('');
+}
+document.getElementById('btn-hist').addEventListener('click', () => {
+  const p = document.getElementById('hist-panel');
+  const showing = p.style.display==='block';
+  p.style.display = showing?'none':'block';
+  if (!showing) renderHistory();
+});
+
+// ── Autocomplete ──────────────────────────────────────────
+const acEl = document.getElementById('ac');
+function setupAC(inputId) {
+  const inp = document.getElementById(inputId);
+  inp.addEventListener('input', () => {
+    const v = inp.value.trim().toLowerCase();
+    if (!v) { acEl.style.display='none'; return; }
+    const hits = CITIES.filter(c=>c.n.toLowerCase().includes(v)).slice(0,8);
+    if (!hits.length) { acEl.style.display='none'; return; }
+    const ir = inp.getBoundingClientRect();
+    const wr = document.getElementById('wrap').getBoundingClientRect();
+    acEl.style.left=(ir.left-wr.left)+'px';
+    acEl.style.top=(ir.top-wr.top-hits.length*36-8)+'px';
+    acEl.style.width=ir.width+'px';
+    acEl.style.display='block';
+    acEl.innerHTML=hits.map(c=>
+      '<div class="ac-item" onmousedown="pickCity(\''+inputId+'\',\''+c.n.replace(/'/g,"&#39;")+'\')">'+c.n+'</div>'
+    ).join('');
+  });
+  inp.addEventListener('blur',()=>setTimeout(()=>acEl.style.display='none',150));
+}
+function pickCity(id, name) {
+  document.getElementById(id).value = name;
+  acEl.style.display = 'none';
+}
+setupAC('inp-from');
+setupAC('inp-to');
+
+function drawPomoCircle() {
+  if (!pomo) return;
+  const limit = pomo.onBreak ? POMO_BREAK : POMO_FOCUS;
+  const elapsed = Date.now() - pomo.phaseStart;
+  const fraction = Math.min(1, elapsed / limit);
+  const pad = 14, offset = 112; // below the real-time circle
+  const cx = pad + 48, cy = pad + 48 + offset, cr = 36;
+
+  // background
+  ctx.beginPath(); ctx.arc(cx, cy, cr+8, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(10,20,40,0.80)'; ctx.fill();
+
+  // track
+  ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI*2);
+  ctx.strokeStyle = pomo.onBreak ? 'rgba(255,180,80,0.15)' : 'rgba(74,172,255,0.15)';
+  ctx.lineWidth = 6; ctx.stroke();
+
+  // depleting arc
+  const start = -Math.PI/2;
+  const end = start + (1 - fraction) * Math.PI * 2;
+  ctx.beginPath(); ctx.arc(cx, cy, cr, start, end);
+  ctx.strokeStyle = pomo.onBreak ? '#ffb450' : '#4aacff';
+  ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
+
+  // label
+  const remMs = Math.max(0, limit - elapsed);
+  const remSec = Math.ceil(remMs / 1000);
+  const m = Math.floor(remSec / 60), s = remSec % 60;
+  const line1 = m > 0 ? m + 'm' : s + 's';
+  const line2 = pomo.onBreak ? 'break' : 'focus';
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillStyle = pomo.onBreak ? '#ffb450' : '#5ab0ff';
+  ctx.fillText(line1, cx, cy - 4);
+  ctx.font = '11px monospace';
+  ctx.fillStyle = pomo.onBreak ? 'rgba(255,180,80,0.6)' : 'rgba(180,220,255,0.6)';
+  ctx.fillText(line2, cx, cy + 12);
+  ctx.textAlign = 'left';
+}
+function drawGlobe() {
+  ctx.beginPath();
+  ctx.arc(W/2,H/2,R,0,Math.PI*2);
+  ctx.fillStyle='#0d2a4a'; ctx.fill();
+  if (geo) {
+    ctx.fillStyle='#1a3d28'; ctx.strokeStyle='#2a5a3a'; ctx.lineWidth=0.6;
+    for (const f of geo.features) {
+      const polys = f.geometry.type==='Polygon'?[f.geometry.coordinates]:f.geometry.coordinates;
+      for (const poly of polys) {
+        for (const ring of poly) {
+          ctx.beginPath(); let pen=false;
+          for (const [lng,lat] of ring) {
+            const p=projectLL(lat,lng);
+            if (!p.vis){pen=false;continue;}
+            pen?ctx.lineTo(p.sx,p.sy):ctx.moveTo(p.sx,p.sy); pen=true;
+          }
+          ctx.fill(); ctx.stroke();
+        }
+      }
+    }
+  }
+  ctx.beginPath(); ctx.arc(W/2,H/2,R,0,Math.PI*2);
+  ctx.strokeStyle='rgba(50,120,220,0.3)'; ctx.lineWidth=1; ctx.stroke();
+}
+
+function drawCities() {
+  ctx.font='10px sans-serif';
+  for (const c of CITIES) {
+    const p=projectLL(c.lat,c.lng);
+    if (!p.vis) continue;
+    ctx.beginPath(); ctx.arc(p.sx,p.sy,3,0,Math.PI*2);
+    ctx.fillStyle='#5ab0ff'; ctx.fill();
+    ctx.fillStyle='rgba(180,220,255,0.85)';
+    ctx.fillText(c.n,p.sx+5,p.sy-3);
+  }
+}
+
+function drawFlight() {
+  const {from,to,progress:prog}=flight;
+  const p1=ll2xyz(from.lat,from.lng), p2=ll2xyz(to.lat,to.lng);
+  const steps=120;
+  ctx.setLineDash([4,4]); ctx.beginPath(); let pen=false;
+  for (let i=0;i<=steps;i++) {
+    const pt=slerp(p1,p2,i/steps), pj=project(...pt);
+    if (!pj.vis){pen=false;continue;}
+    pen?ctx.lineTo(pj.sx,pj.sy):ctx.moveTo(pj.sx,pj.sy); pen=true;
+  }
+  ctx.strokeStyle='rgba(74,172,255,0.3)'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.setLineDash([]); ctx.beginPath(); pen=false;
+  for (let i=0;i<=steps*prog;i++) {
+    const pt=slerp(p1,p2,i/steps), pj=project(...pt);
+    if (!pj.vis){pen=false;continue;}
+    pen?ctx.lineTo(pj.sx,pj.sy):ctx.moveTo(pj.sx,pj.sy); pen=true;
+  }
+  ctx.strokeStyle='rgba(74,172,255,0.9)'; ctx.lineWidth=2.5; ctx.stroke();
+  [from,to].forEach(c => {
+    const p=projectLL(c.lat,c.lng); if (!p.vis) return;
+    ctx.beginPath(); ctx.arc(p.sx,p.sy,5,0,Math.PI*2);
+    ctx.fillStyle='#5ab0ff'; ctx.fill();
+    ctx.font='bold 12px sans-serif'; ctx.fillStyle='#7ecfff';
+    ctx.fillText(c.n,p.sx+7,p.sy-4);
+  });
+  const pos=slerp(p1,p2,prog), pj=project(...pos);
+  if (pj.vis) { ctx.font='16px sans-serif'; ctx.fillStyle='#ffe080'; ctx.fillText('✈',pj.sx-8,pj.sy+6); }
+}
+
+function drawTimer() {
+  const speed=parseFloat(document.getElementById('speed-sel').value);
+  const remFlight=flight.totalMs*(1-flight.progress);
+  const remReal=remFlight/speed;
+  const singleRow=speed===1;
+  const line1='✈  '+formatTime(remFlight);
+  const line2=singleRow?null:'⏱  '+formatTime(remReal);
+  const pad=14;
+  ctx.font='bold 14px monospace';
+  const tw=Math.max(ctx.measureText(line1).width,line2?ctx.measureText(line2).width:0);
+  const bw=tw+24, bh=singleRow?58:78, bx=W-pad-bw, by=pad;
+  ctx.fillStyle='rgba(10,20,40,0.80)';
+  ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,6); ctx.fill();
+  ctx.font='10px sans-serif'; ctx.fillStyle='rgba(120,180,255,0.4)';
+  ctx.fillText('study session',bx+12,by+14);
+  ctx.font='bold 14px monospace'; ctx.fillStyle='#5ab0ff';
+  ctx.fillText(line1,bx+12,by+32);
+  if (line2) { ctx.fillStyle='rgba(180,220,255,0.55)'; ctx.fillText(line2,bx+12,by+52); }
+}
+
+function drawCircleTimer() {
+  const speed=parseFloat(document.getElementById('speed-sel').value);
+  const remReal=flight.totalMs*(1-flight.progress)/speed;
+  const totalReal=flight.totalMs/speed;
+  const fraction=1-(remReal/totalReal);
+  const pad=14, cx=pad+48, cy=pad+48, cr=36;
+  ctx.beginPath(); ctx.arc(cx,cy,cr+8,0,Math.PI*2);
+  ctx.fillStyle='rgba(10,20,40,0.80)'; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx,cy,cr,0,Math.PI*2);
+  ctx.strokeStyle='rgba(74,172,255,0.15)'; ctx.lineWidth=6; ctx.stroke();
+  const start=-Math.PI/2, end=start+fraction*Math.PI*2;
+  ctx.beginPath(); ctx.arc(cx,cy,cr,start,end);
+  ctx.strokeStyle='#4aacff'; ctx.lineWidth=6; ctx.lineCap='round'; ctx.stroke(); ctx.lineCap='butt';
+  const t=Math.ceil(remReal/1000);
+  const h=Math.floor(t/3600), m=Math.floor((t%3600)/60), s=t%60;
+  const line1=h>0?h+'h':m+'m';
+  const line2=h>0?String(m).padStart(2,'0')+'m':String(s).padStart(2,'0')+'s';
+  ctx.textAlign='center';
+  ctx.font='bold 13px monospace'; ctx.fillStyle='#5ab0ff'; ctx.fillText(line1,cx,cy-4);
+  ctx.font='11px monospace'; ctx.fillStyle='rgba(180,220,255,0.6)'; ctx.fillText(line2,cx,cy+12);
+  ctx.textAlign='left';
+}
+
+function drawBanner() {
+  if (banner.fading) {
+    banner.opacity-=0.03;
+    if (banner.opacity<=0) { banner.current=banner.next; banner.next=null; banner.fading=false; banner.opacity=0; }
+  } else if (banner.opacity<1) {
+    banner.opacity=Math.min(1,banner.opacity+0.03);
+  }
+  ctx.save();
+  ctx.font='600 14px sans-serif';
+  ctx.globalAlpha=Math.max(0,banner.opacity);
+  const tw=ctx.measureText(banner.current).width;
+  const bw=tw+28, bh=30, bx=W/2-bw/2, by=H*0.1;
+  ctx.fillStyle='rgba(10,20,40,0.75)';
+  ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill();
+  ctx.fillStyle='rgba(180,220,255,0.9)';
+  ctx.fillText(banner.current,bx+14,by+20);
+  ctx.restore();
+}
+
+function loop() {
+  ctx.clearRect(0,0,W,H);
+  if (!dragging) {
+    vX*=0.9; vY*=0.9; rotY+=vY; rotX+=vX;
+    rotX=Math.max(-1.4,Math.min(1.4,rotX));
+  }
+  drawGlobe();
+  drawCities();
+  drawBanner();
+  if (flight) drawFlight();
+  if (flight) drawTimer();
+  if (flight) drawCircleTimer();
+  if (flight) drawPomoCircle();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
