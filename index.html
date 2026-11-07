@@ -70,6 +70,7 @@ select{background:#0f1e30;border:1px solid #1e3550;color:#5ab0ff;border-radius:4
   <div id="hint">drag to rotate · scroll to zoom</div>
 </div>
 
+<script type="module" src="db.js"></script>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -334,74 +335,67 @@ document.getElementById('btn-fly').addEventListener('click', () => {
   startFlight(from,to);
 });
 
-// ── Supabase ──────────────────────────────────────────────
-const SB_URL = 'https://dwzvbiuylptzeoohwovt.supabase.co';
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3enZiaXV5bHB0emVvb2h3b3Z0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5NDg1MzgsImV4cCI6MjA5NjUyNDUzOH0.TUr2vpvxz2yokDuq-VZctLZ1sdYSSP-JE7l9LHe1xy0';
-
-async function sbFetch(method, body) {
-  const res = await fetch(SB_URL + '/rest/v1/sessions?id=eq.1', {
-    method,
-    headers: {
-      'apikey': SB_KEY,
-      'Authorization': 'Bearer ' + SB_KEY,
-      'Content-Type': 'application/json',
-      'Prefer': method === 'PATCH' ? 'return=minimal' : 'return=representation'
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  return method === 'PATCH' ? null : res.json();
+// ── Flight history (stored via db.js) ─────────────────────
+// db.js is a module that loads after this script; wait for it before any database call.
+const dbReady = new Promise(res => {
+  if (window.DB) res(window.DB);
+  else window.addEventListener('db-ready', () => res(window.DB), { once: true });
+});
+function todayDDMMYYYY() {
+  const d = new Date();
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
 }
 
-async function loadHistory() {
-  try {
-    const rows = await sbFetch('GET');
-    const data = rows?.[0]?.data;
-    if (Array.isArray(data)) return data;
-  } catch(e) {}
-  // fallback to localStorage
-  try { return JSON.parse(localStorage.getItem('fgt_hist') || '[]'); } catch(e) { return []; }
-}
-
-async function saveHistory(entries) {
-  try {
-    await sbFetch('PATCH', { data: entries });
-  } catch(e) {}
-  // also keep localStorage as backup
-  localStorage.setItem('fgt_hist', JSON.stringify(entries));
-}
 async function saveToHistory(from, to, km, hours) {
   const speed = parseFloat(document.getElementById('speed-sel').value);
-  const h = await loadHistory();
-  h.unshift({
-    from:from.n, to:to.n, km:Math.round(km),
-    dur:formatDur(hours),
-    realDur: speed>1 ? formatDur(hours/speed) : null,
-    date:new Date().toLocaleDateString()
-  });
-  if (h.length>50) h.length=50;
-  await saveHistory(h);
+  try {
+    const DB = await dbReady;
+    const h = await DB.loadFlights();
+    await DB.addFlight({
+      seq: h.reduce((m,f) => Math.max(m, f.seq), 0) + 1,
+      from:from.n, to:to.n, km:Math.round(km),
+      dur:formatDur(hours),
+      realDur: speed>1 ? formatDur(hours/speed) : null,
+      date:todayDDMMYYYY()
+    });
+  } catch(e) {
+    console.error(e);
+    alert("couldn't save this flight — check your connection");
+  }
 }
 
-async function deleteHistory(i) {
-  const h = await loadHistory();
-  h.splice(i,1);
-  await saveHistory(h);
-  renderHistory();
+async function deleteHistory(id) {
+  try {
+    const DB = await dbReady;
+    await DB.deleteFlight(id);
+  } catch(e) {
+    console.error(e);
+    alert("couldn't delete — check your connection");
+  }
+  await renderHistory();
 }
 
 async function renderHistory() {
-  const h = await loadHistory();
   const list = document.getElementById('hist-list');
+  let h;
+  try {
+    const DB = await dbReady;
+    h = await DB.loadFlights();
+  } catch(e) {
+    console.error(e);
+    list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:#2a5a8a">couldn\'t load flights — check your connection.</div>';
+    return;
+  }
   if (!h.length) {
     list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:#2a5a8a">no completed flights yet.</div>';
     return;
   }
-  list.innerHTML = h.map((f,i) =>
+  list.innerHTML = h.map(f =>
     '<div class="hist-row">'+
       '<span style="color:#7ec8ff">'+f.from+' → '+f.to+'</span>'+
       '<span style="color:#2a6a9a;margin:0 10px">'+f.km+' km · '+f.dur+(f.realDur?' · '+f.realDur+' real':'')+'</span>'+
       '<span style="color:#2a5a8a;margin-right:10px">'+f.date+'</span>'+
-      '<span onclick="deleteHistory('+i+')" style="color:#5a1e1e;cursor:pointer;font-size:15px" onmouseover="this.style.color=\'#ff7e7e\'" onmouseout="this.style.color=\'#5a1e1e\'">✕</span>'+
+      '<span onclick="deleteHistory(\''+f.id+'\')" style="color:#5a1e1e;cursor:pointer;font-size:15px" onmouseover="this.style.color=\'#ff7e7e\'" onmouseout="this.style.color=\'#5a1e1e\'">✕</span>'+
     '</div>'
   ).join('');
 }
