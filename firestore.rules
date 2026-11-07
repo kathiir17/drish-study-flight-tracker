@@ -1,0 +1,34 @@
+rules_version = '2';
+
+// Drish's study flight tracker — Firestore security rules.
+//
+// Apply: Firebase console → Firestore Database → Rules → paste this whole file → Publish.
+//
+//   • Anyone with the link can read flights, add a correctly-shaped flight, or delete one
+//     (same openness as before). Nobody can edit a flight or write anywhere else.
+//   • Only the project owner (Firebase console / admin key) bypasses these rules.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function validFlight(d) {
+      return d.keys().hasOnly(['seq', 'from', 'to', 'km', 'dur', 'realDur', 'date'])
+          && d.keys().hasAll(['seq', 'from', 'to', 'km', 'dur', 'realDur', 'date'])
+          && d.seq is int && d.seq >= 1
+          && d.from is string && d.from.size() >= 1 && d.from.size() <= 40
+          && d.to is string && d.to.size() >= 1 && d.to.size() <= 40
+          && d.from != d.to
+          && d.km is int && d.km >= 0 && d.km <= 20100       // longest possible great-circle route
+          && d.dur is string && d.dur.size() >= 1 && d.dur.size() <= 20
+          && (d.realDur == null || (d.realDur is string && d.realDur.size() <= 20))
+          && d.date is string && d.date.matches('^[0-3][0-9]/[01][0-9]/20[0-9][0-9]$');
+    }
+
+    match /flights/{flightId} {
+      allow read: if true;
+      allow create: if validFlight(request.resource.data);
+      allow delete: if true;
+    }
+    // Everything else is denied by default.
+  }
+}
