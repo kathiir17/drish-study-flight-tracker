@@ -34,7 +34,12 @@ we're building next, in what order, and the decisions already made.
   leaves no pass.
 - **order:** data model first, then the ui shell, then features slot into the new ui.
   don't build new screens in the old style.
-- **navigation pattern:** show kdot 2–3 options (mockups) before building.
+- **navigation pattern:** apple maps-style floating sidebar with the tabs across its top;
+  the globe always stays in view beside it (docks to the bottom on iphone). passes →
+  history with boarding passes, map → its own globe lit with every past route, stats →
+  its own page, all inside this panel in later phases.
+- **custom pomodoro lengths** came forward into phase 1 (with the new route card).
+- **home-screen / dock app** set up in phase 1 (manifest, icon, apple meta tags).
 
 ## phase 0 — data model (one rules change for everything)
 
@@ -63,7 +68,14 @@ can read or create one; none can be edited or deleted.
 as "untagged". never backfill by rewriting the list. any backfill is a one-off admin-key
 script updating individual documents, and only with kdot's sign-off.
 
-## phase 1 — ui shell and look
+## phase 1 — ui shell and look (done, november 2026)
+
+built: star field, shaded globe with atmosphere and full retina sharpness, frosted
+panels, sf pro rounded numerals, sidebar panel with tabs, plan / flying / landed cards, passes
+tab (history), map and stats placeholders, tap-a-city picking with hover/press bulge,
+touch drag + pinch + trackpad pinch, autocomplete with countries and keyboard support,
+custom pomodoro lengths, two-tap stop and delete, a visible speed control, app icon and
+manifest, split into index.html / styles.css / app.js. original brief below.
 
 - apple maps feel: clean, light-touch panels, a proper type scale, generous spacing.
 - move hud elements out of hardcoded canvas pixel offsets into a responsive layout; most
@@ -107,6 +119,8 @@ script updating individual documents, and only with kdot's sign-off.
 
 ## parked (don't start without kdot's go-ahead)
 
+- **turn the globe to face the route.** in phase 1 the globe stays where she left it, so
+  a route over the far side is hard to see until she drags. same maths as below.
 - **plane-down view.** needs reliable "centre the globe on a lat/lng" maths. fly-to-city
   failed three times: derive the target rotation from `project()` and verify with a debug
   readout. solve it once and reuse it.
@@ -118,4 +132,3 @@ script updating individual documents, and only with kdot's sign-off.
 ## open questions
 
 - the seed list of her modules (kdot is compiling it).
-- the navigation pattern (show options first).

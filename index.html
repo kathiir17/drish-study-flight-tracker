@@ -2,748 +2,167 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#07111f;height:100vh;overflow:hidden;display:flex;flex-direction:column;font-family:sans-serif}
-#wrap{flex:1;position:relative;min-height:0}
-canvas{display:block;width:100%;height:100%;cursor:grab}
-canvas:active{cursor:grabbing}
-#ui{background:#0d1a2b;border-top:1px solid #1a2d42;padding:10px 14px;flex-shrink:0}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
-.row:last-child{margin-bottom:0}
-input[type=text],input:not([type]){background:#0f1e30;border:1px solid #1e3550;border-radius:6px;padding:6px 10px;color:#c8dff0;font-size:13px;outline:none;flex:1;min-width:120px}
-input[type=text]:focus,input:not([type]):focus{border-color:#3a7abf}
-input::placeholder{color:#2a4a6a}
-button{background:#0f2a45;border:1px solid #1e4a72;border-radius:6px;padding:6px 14px;color:#5ab0ff;font-size:13px;cursor:pointer}
-button:hover{background:#143550}
-.danger{background:#2a0f0f!important;border-color:#5a1e1e!important;color:#ff7e7e!important}
-#progress-wrap{background:#0f1e30;border-radius:4px;height:6px;flex:1;min-width:80px;overflow:hidden}
-#progress-bar{height:100%;width:0%;background:linear-gradient(90deg,#1a5fa0,#4aacff);border-radius:4px;transition:width 0.4s}
-#status{font-size:12px;color:#5ab0ff;white-space:nowrap}
-#hist-panel{display:none;max-height:150px;overflow-y:auto;margin-bottom:6px;border:1px solid #1a2d42;border-radius:6px;background:#09131f}
-.hist-row{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid #111f2e;font-size:12px}
-.hist-row:last-child{border-bottom:none}
-#ac{position:absolute;background:#0d1a2b;border:1px solid #1e3550;border-radius:6px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 16px #000c;display:none}
-.ac-item{padding:7px 11px;font-size:13px;cursor:pointer;border-bottom:1px solid #111f2e;color:#8ab8d8}
-.ac-item:hover{background:#0f2035;color:#4aacff}
-.ac-item:last-child{border-bottom:none}
-select{background:#0f1e30;border:1px solid #1e3550;color:#5ab0ff;border-radius:4px;font-size:11px;padding:2px 4px}
-#hint{font-size:11px;color:#1a3a5a;text-align:center;margin-top:4px}
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>study flight</title>
+<meta name="description" content="a study timer shown as a flight across the globe"/>
+<meta name="theme-color" content="#040914"/>
+<meta name="color-scheme" content="dark"/>
+<!-- home screen / dock app -->
+<link rel="manifest" href="manifest.webmanifest"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="study flight"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<link rel="apple-touch-icon" href="icons/icon-180.png"/>
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg"/>
+<link rel="stylesheet" href="styles.css"/>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="c"></canvas>
-  <div id="ac"></div>
-</div>
-<div id="ui">
-  <div id="hist-panel"><div id="hist-list"></div></div>
-  <div class="row">
-    <span style="font-size:12px;color:#2a5a8a">from</span>
-    <input id="inp-from" placeholder="departure..." autocomplete="off"/>
-    <span style="font-size:12px;color:#2a5a8a">to</span>
-    <input id="inp-to" placeholder="destination..." autocomplete="off"/>
-  </div>
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-    <label style="font-size:12px;color:#2a5a8a;display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
-      pomodoro <input type="checkbox" id="chk-pomo" style="cursor:pointer;margin:0"/>
-    </label>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button id="btn-fly">fly ✈</button>
-      <button id="btn-hist">history</button>
-      <button class="danger" id="btn-stop" style="display:none" onclick="stopFlight()">stop</button>
+
+<canvas id="globe" aria-label="globe: drag to turn, pinch or scroll to zoom, tap a city to choose it"></canvas>
+
+<div id="pill" class="pill" aria-live="polite"></div>
+
+
+<aside id="panel" class="panel">
+  <nav class="tabs" aria-label="sections">
+  <button type="button" class="tab" data-view="fly" aria-current="page">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15.5v-1.8l-8-5V3.5a1.5 1.5 0 0 0-3 0v5.2l-8 5v1.8l8-2.5v5.4l-2 1.5V21l3.5-1 3.5 1v-1.6l-2-1.5V13z"/></svg>
+    <span>fly</span><i class="live-dot" aria-hidden="true"></i>
+  </button>
+  <button type="button" class="tab" data-view="passes">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2.5a2.5 2.5 0 0 0 0 5V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2.5a2.5 2.5 0 0 0 0-5zM15 5v14" class="stroke"/></svg>
+    <span>passes</span>
+  </button>
+  <button type="button" class="tab" data-view="map">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6.5v13.5L9 17.5l6 2.5 6-2.5V4l-6 2.5zM9 4v13.5M15 6.5V20" class="stroke"/></svg>
+    <span>map</span>
+  </button>
+  <button type="button" class="tab" data-view="stats">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V12M12 20V5M19 20v-9" class="stroke thick"/></svg>
+    <span>stats</span>
+  </button>
+  </nav>
+
+  <div class="panel-body">
+  <!-- ── fly ─────────────────────────────────────────── -->
+  <section id="view-fly" class="view" aria-label="fly">
+
+    <form id="card-plan" class="block" autocomplete="off" novalidate>
+      <div class="route-fields">
+        <div class="field">
+          <span class="marker from" aria-hidden="true"></span>
+          <input id="inp-from" placeholder="from" aria-label="departure city" spellcheck="false" autocapitalize="off" autocorrect="off"
+                 role="combobox" aria-autocomplete="list" aria-controls="ac" aria-expanded="false"/>
+        </div>
+        <div class="field">
+          <span class="marker to" aria-hidden="true"></span>
+          <input id="inp-to" placeholder="to" aria-label="destination city" spellcheck="false" autocapitalize="off" autocorrect="off"
+                 role="combobox" aria-autocomplete="list" aria-controls="ac" aria-expanded="false"/>
+        </div>
+        <button type="button" id="btn-swap" class="icon-btn swap" aria-label="swap cities">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v15M8 4 4.5 7.5M8 4l3.5 3.5M16 20V5m0 15-3.5-3.5M16 20l3.5-3.5"/></svg>
+        </button>
+      </div>
+
+      <p id="route-preview" class="preview"></p>
+
+      <div class="pomo-row">
+        <label class="toggle">
+          <input type="checkbox" id="chk-pomo" role="switch"/>
+          <span class="toggle-track" aria-hidden="true"></span>
+          <span>pomodoro</span>
+        </label>
+        <div id="pomo-lengths" class="pomo-lengths" hidden>
+          <label><input type="number" id="pomo-focus" inputmode="numeric" min="1" max="180" step="1" aria-label="focus minutes"/> min focus</label>
+          <label><input type="number" id="pomo-break" inputmode="numeric" min="1" max="60" step="1" aria-label="break minutes"/> min break</label>
+        </div>
+      </div>
+
+      <p id="plan-msg" class="msg" role="alert"></p>
+    </form>
+
+    <div id="card-flight" class="block" hidden>
+      <div class="flight-head">
+        <h2 id="fl-route" class="route-title"></h2>
+        <button type="button" id="btn-stop" class="quiet small">stop</button>
+      </div>
+      <div class="flight-body">
+        <div class="time-left">
+          <div id="fl-left" class="big-num"></div>
+          <div class="sub">left in the air</div>
+          <div id="fl-real" class="sub" hidden></div>
+        </div>
+        <div id="pomo-ring" class="ring" hidden>
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <circle class="ring-track" cx="32" cy="32" r="27"/>
+            <circle id="pomo-arc" class="ring-arc" cx="32" cy="32" r="27"/>
+          </svg>
+          <div class="ring-text"><b id="pomo-time"></b><span id="pomo-phase"></span></div>
+        </div>
+      </div>
+      <div class="progress">
+        <div class="track"><div id="fl-bar" class="fill"></div></div>
+        <div class="progress-meta"><span id="fl-flown"></span><span id="fl-togo"></span></div>
+      </div>
     </div>
-  </div>
-  <div class="row">
-    <div id="progress-wrap"><div id="progress-bar"></div></div>
-    <span id="status">ready</span>
-    <span style="font-size:11px;color:#2a5a8a">speed:</span>
-    <select id="speed-sel">
-      <option value="1">1x</option>
-      <option value="2">2x</option>
-      <option value="5">5x</option>
-      <option value="10">10x</option>
-      <option value="100">100x</option>
-      <option value="10000">10000x</option>
-    </select>
-  </div>
-  <div id="hint">drag to rotate · scroll to zoom</div>
-</div>
 
+    <div id="speed-row" class="speed-row">
+      <span class="speed-label">speed</span>
+      <div class="segmented" role="group" aria-label="flight speed">
+        <button type="button" data-speed="1" aria-pressed="true">1x</button>
+        <button type="button" data-speed="2" aria-pressed="false">2x</button>
+        <button type="button" data-speed="5" aria-pressed="false">5x</button>
+        <button type="button" data-speed="10" aria-pressed="false">10x</button>
+        <button type="button" data-speed="100" aria-pressed="false">100x</button>
+        <button type="button" data-speed="10000" aria-pressed="false">10000x</button>
+      </div>
+    </div>
+    <!-- outside the form so it can sit under the speed control; form= still submits it -->
+    <button type="submit" form="card-plan" id="btn-fly" class="primary">fly</button>
+
+    <div id="card-landed" class="block" hidden>
+      <h2 id="ld-title" class="landed-title"></h2>
+      <p id="ld-sub" class="landed-sub"></p>
+      <div class="actions">
+        <button type="button" id="btn-onward" class="primary"></button>
+        <button type="button" id="btn-new" class="quiet">new route</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── passes ──────────────────────────────────────── -->
+  <section id="view-passes" class="view" aria-label="passes" hidden>
+    <header class="sheet-head">
+      <h2>your flights</h2>
+      <span id="hist-count" class="sheet-count"></span>
+    </header>
+    <div id="hist-list" class="hist-list"></div>
+  </section>
+
+  <!-- ── map ─────────────────────────────────────────── -->
+  <section id="view-map" class="view" aria-label="map" hidden>
+    <div class="soon">
+      <h2>your flight map</h2>
+      <p>every route you've flown, drawn across the globe. it's being built now, and your finished flights will all be on it.</p>
+    </div>
+  </section>
+
+  <!-- ── stats ───────────────────────────────────────── -->
+  <section id="view-stats" class="view" aria-label="stats" hidden>
+    <div class="soon">
+      <h2>your stats</h2>
+      <p>hours per module, longest flights, streaks and the places you've been. coming soon, counting every flight you land.</p>
+    </div>
+  </section>
+  </div>
+</aside>
+
+
+<!-- city suggestions: at page level so the panel's scrolling can't clip it; app.js positions it -->
+<ul id="ac" class="ac" role="listbox" hidden></ul>
+
+<script src="app.js" defer></script>
 <script type="module" src="db.js"></script>
-<script>
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-
-let W, H, R;
-function resize() {
-  W = canvas.width  = canvas.offsetWidth;
-  H = canvas.height = canvas.offsetHeight;
-  R = Math.min(W, H) * 0.42;
-}
-resize();
-window.addEventListener('resize', resize);
-
-let rotX = 0.3, rotY = 0, vX = 0, vY = 0;
-let dragging = false, mx = 0, my = 0;
-
-function ll2xyz(lat, lng) {
-  const la = lat * Math.PI / 180, lo = lng * Math.PI / 180;
-  return [Math.cos(la)*Math.cos(-lo), Math.sin(la), Math.cos(la)*Math.sin(-lo)];
-}
-function project(x, y, z) {
-  const x1 =  x*Math.cos(rotY) + z*Math.sin(rotY);
-  const z1 = -x*Math.sin(rotY) + z*Math.cos(rotY);
-  const y2 =  y*Math.cos(rotX) - z1*Math.sin(rotX);
-  const z2 =  y*Math.sin(rotX) + z1*Math.cos(rotX);
-  return { sx: W/2 + x1*R, sy: H/2 - y2*R, vis: z2 > 0 };
-}
-function projectLL(lat, lng) { return project(...ll2xyz(lat, lng)); }
-function slerp(a, b, t) {
-  let d = Math.max(-1, Math.min(1, a[0]*b[0]+a[1]*b[1]+a[2]*b[2]));
-  const om = Math.acos(d);
-  if (om < 1e-6) return a;
-  const s = 1/Math.sin(om);
-  return a.map((v,i) => s*(Math.sin((1-t)*om)*v + Math.sin(t*om)*b[i]));
-}
-function haversine(la1, lo1, la2, lo2) {
-  const Rk = 6371, D = Math.PI/180;
-  const dLa = (la2-la1)*D, dLo = (lo2-lo1)*D;
-  const a = Math.sin(dLa/2)**2 + Math.cos(la1*D)*Math.cos(la2*D)*Math.sin(dLo/2)**2;
-  return 2*Rk*Math.asin(Math.sqrt(a));
-}
-function formatDur(hours) {
-  const totalSec = Math.round(hours * 3600);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return h + 'h ' + String(m).padStart(2,'0') + 'm';
-  if (m > 0) return m + 'm ' + String(s).padStart(2,'0') + 's';
-  return s + 's';
-}
-function formatTime(ms) {
-  const t = Math.ceil(ms/1000);
-  const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), s = t%60;
-  if (h > 0) return h+'h '+String(m).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s';
-  return m+'m '+String(s).padStart(2,'0')+'s';
-}
-
-canvas.addEventListener('mousedown', e => { dragging=true; mx=e.clientX; my=e.clientY; vX=vY=0; });
-window.addEventListener('mouseup', () => dragging=false);
-window.addEventListener('mousemove', e => {
-  if (!dragging) return;
-  vY=(e.clientX-mx)*0.005; vX=(e.clientY-my)*0.005;
-  rotY+=vY; rotX+=vX;
-  rotX=Math.max(-1.4,Math.min(1.4,rotX));
-  mx=e.clientX; my=e.clientY;
-});
-canvas.addEventListener('wheel', e => {
-  R=Math.max(80,Math.min(window.innerHeight*0.9,R-e.deltaY*0.3));
-  e.preventDefault();
-},{passive:false});
-
-const CITIES = [
-  {n:'london',lat:51.51,lng:-0.13},{n:'paris',lat:48.86,lng:2.35},
-  {n:'new york',lat:40.71,lng:-74.01},{n:'tokyo',lat:35.69,lng:139.69},
-  {n:'sydney',lat:-33.87,lng:151.21},{n:'dubai',lat:25.20,lng:55.27},
-  {n:'singapore',lat:1.35,lng:103.82},{n:'são paulo',lat:-23.55,lng:-46.63},
-  {n:'cairo',lat:30.04,lng:31.24},{n:'mumbai',lat:19.08,lng:72.88},
-  {n:'los angeles',lat:34.05,lng:-118.24},{n:'nairobi',lat:-1.29,lng:36.82},
-  {n:'moscow',lat:55.75,lng:37.62},{n:'beijing',lat:39.90,lng:116.41},
-  {n:'cape town',lat:-33.92,lng:18.42},{n:'mexico city',lat:19.43,lng:-99.13},
-  {n:'shanghai',lat:31.23,lng:121.47},{n:'delhi',lat:28.61,lng:77.21},
-  {n:'istanbul',lat:41.01,lng:28.95},{n:'osaka',lat:34.69,lng:135.50},
-  {n:'karachi',lat:24.86,lng:67.01},{n:'dhaka',lat:23.72,lng:90.41},
-  {n:'bangkok',lat:13.76,lng:100.50},{n:'kolkata',lat:22.57,lng:88.36},
-  {n:'lagos',lat:6.52,lng:3.38},{n:'kinshasa',lat:-4.32,lng:15.32},
-  {n:'jakarta',lat:-6.21,lng:106.85},{n:'seoul',lat:37.57,lng:126.98},
-  {n:'taipei',lat:25.03,lng:121.56},{n:'hong kong',lat:22.32,lng:114.17},
-  {n:'kuala lumpur',lat:3.14,lng:101.69},{n:'manila',lat:14.60,lng:120.98},
-  {n:'bogotá',lat:4.71,lng:-74.07},{n:'lima',lat:-12.05,lng:-77.04},
-  {n:'santiago',lat:-33.45,lng:-70.67},{n:'buenos aires',lat:-34.60,lng:-58.38},
-  {n:'johannesburg',lat:-26.20,lng:28.04},{n:'casablanca',lat:33.59,lng:-7.62},
-  {n:'accra',lat:5.56,lng:-0.20},{n:'addis ababa',lat:9.03,lng:38.74},
-  {n:'riyadh',lat:24.69,lng:46.72},{n:'tehran',lat:35.69,lng:51.39},
-  {n:'baghdad',lat:33.34,lng:44.40},{n:'lahore',lat:31.55,lng:74.34},
-  {n:'chicago',lat:41.88,lng:-87.63},{n:'toronto',lat:43.65,lng:-79.38},
-  {n:'miami',lat:25.77,lng:-80.19},{n:'vancouver',lat:49.25,lng:-123.12},
-  {n:'amsterdam',lat:52.37,lng:4.90},{n:'berlin',lat:52.52,lng:13.40},
-  {n:'madrid',lat:40.42,lng:-3.70},{n:'rome',lat:41.90,lng:12.50},
-  {n:'lisbon',lat:38.72,lng:-9.14},{n:'vienna',lat:48.21,lng:16.37},
-  {n:'warsaw',lat:52.23,lng:21.01},{n:'stockholm',lat:59.33,lng:18.07},
-  {n:'auckland',lat:-36.86,lng:174.76},{n:'melbourne',lat:-37.81,lng:144.96},
-  {n:'houston',lat:29.76,lng:-95.37},{n:'anchorage',lat:61.22,lng:-149.90},
-  {n:'havana',lat:23.14,lng:-82.36},{n:'caracas',lat:10.48,lng:-66.88},
-  {n:'la paz',lat:-16.50,lng:-68.15},{n:'dakar',lat:14.72,lng:-17.47},
-  {n:'almaty',lat:43.22,lng:76.85},{n:'tashkent',lat:41.30,lng:69.24},
-  {n:'ulaanbaatar',lat:47.91,lng:106.88},{n:'krasnoyarsk',lat:56.01,lng:92.87},
-  {n:'perth',lat:-31.95,lng:115.86},{n:'jaffna',lat:9.67,lng:80.02},
-];
-
-// Country shapes from the CDN, pinned to exact versions with integrity hashes: the
-// browser refuses the file if its contents ever differ from what we checked, so a
-// compromised CDN or package release can't run code on the page. Upgrading either
-// means updating the version AND recomputing its hash.
-let geo = null;
-const topoScript = document.createElement('script');
-topoScript.src = 'https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js';
-topoScript.integrity = 'sha384-Ukv1p/xTma6P4/2bY5KzWBw+ydSpXmhCMtyciIQVDJ1RmOxtCYNMF1uXT9T63H67';
-topoScript.crossOrigin = 'anonymous';
-topoScript.onload = () => {
-  fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json',
-        { integrity: 'sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf' })
-    .then(r => r.json()).then(t => {
-      geo = { type:'FeatureCollection', features: topojson.feature(t, t.objects.countries).features };
-    });
-};
-document.head.appendChild(topoScript);
-
-// ── Audio ─────────────────────────────────────────────────
-// Browsers (iOS Safari especially) only allow sound after a tap or key press, so the
-// audio context is created and "unlocked" on the first interaction, and woken up again
-// whenever the browser has paused it (tab hidden, phone locked, call came in).
-let audioCtx = null, audioUnlocked = false;
-function unlockAudio() {
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return;
-  if (!audioCtx) audioCtx = new AC();
-  if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
-  if (!audioUnlocked) {
-    // a silent one-sample sound played inside the tap unlocks older iOS versions
-    try {
-      const s = audioCtx.createBufferSource();
-      s.buffer = audioCtx.createBuffer(1, 1, 22050);
-      s.connect(audioCtx.destination); s.start(0);
-    } catch(e) {}
-    audioUnlocked = true;
-  }
-}
-['pointerdown','touchend','keydown'].forEach(ev => window.addEventListener(ev, unlockAudio, { passive:true }));
-
-function playChime(type) {
-  const ac = audioCtx;
-  if (!ac) return; // no tap yet (e.g. a restored flight landing on page load): stay silent
-  if (ac.state === 'running') { scheduleNotes(ac, type); return; }
-  // paused: try to wake it, but don't let a stale chime play much later
-  Promise.race([ac.resume(), new Promise((_, rej) => setTimeout(rej, 1000))])
-    .then(() => scheduleNotes(ac, type)).catch(() => {});
-}
-function scheduleNotes(ac, type) {
-  try {
-    let notes;
-    if      (type === 'takeoff') notes = [{f:330,d:0.3},{f:392,d:0.3},{f:523,d:0.5}];
-    else if (type === 'halfway') notes = [{f:440,d:0.4},{f:554,d:0.4},{f:659,d:0.4},{f:880,d:0.6}];
-    else if (type === 'landing') notes = [{f:523,d:0.25},{f:523,d:0.25},{f:523,d:0.25},{f:659,d:0.5},{f:523,d:0.5},{f:659,d:0.5},{f:784,d:0.8}];
-    else if (type === 'break')   notes = [{f:523,d:0.5},{f:392,d:0.5}];
-    else if (type === 'resume')  notes = [{f:392,d:0.5},{f:523,d:0.5},{f:659,d:0.5}];
-    let t = ac.currentTime;
-    notes.forEach(({f,d}) => {
-      const osc = ac.createOscillator();
-      const gain = ac.createGain();
-      osc.connect(gain); gain.connect(ac.destination);
-      osc.type = type === 'landing' ? 'triangle' : 'sine';
-      osc.frequency.setValueAtTime(f, t);
-      gain.gain.setValueAtTime(0.18, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + d);
-      osc.start(t); osc.stop(t + d);
-      t += d * 0.85;
-    });
-  } catch(e) {}
-}
-
-// ── Pomodoro ──────────────────────────────────────────────
-// Runs on real wall-clock time from when the flight started. The current phase is
-// worked out from the clock (not by counting ticks), so it can't drift or get stuck.
-const POMO_FOCUS = 50 * 60 * 1000;
-const POMO_BREAK = 10 * 60 * 1000;
-const POMO_CYCLE = POMO_FOCUS + POMO_BREAK;
-let pomo = null; // { start, onBreak } while a pomodoro flight is in the air
-
-function pomoPhase(now) {
-  const pos = Math.max(0, now - pomo.start) % POMO_CYCLE;
-  return pos < POMO_FOCUS
-    ? { onBreak:false, left:POMO_FOCUS - pos, limit:POMO_FOCUS }
-    : { onBreak:true,  left:POMO_CYCLE - pos, limit:POMO_BREAK };
-}
-
-// ── Banner ────────────────────────────────────────────────
-const MESSAGES = [
-  {threshold:0,    text:"wheels up — lock in 👀"},
-  {threshold:0.25, text:"stay focused. 🫡"},
-  {threshold:0.5,  text:"halfway there. ⏳"},
-  {threshold:0.75, text:"almost done... 🥰"},
-  {threshold:1,    text:"landed. great session 🎉"},
-];
-const BREAK_MSG = 'break time. step away 🧘';
-let banner = { current:"enter a route to begin", next:null, opacity:1, fading:false };
-
-function getBannerMsg(p) {
-  let msg = MESSAGES[0].text;
-  for (const m of MESSAGES) { if (p >= m.threshold) msg = m.text; }
-  return msg;
-}
-function updateBanner(p) {
-  const msg = (pomo && pomo.onBreak) ? BREAK_MSG : getBannerMsg(p);
-  if (msg !== banner.current && msg !== banner.next) {
-    banner.next = msg; banner.fading = true;
-  }
-}
-function resetBanner() {
-  banner.current="enter a route to begin"; banner.next=null; banner.fading=false; banner.opacity=1;
-}
-
-// ── Flight ────────────────────────────────────────────────
-// Timing model: flight time runs at `speed` × real time. We store how much flight time
-// had passed (virtMs) at the moment of the last speed change (lastT); everything else is
-// worked out from the clock. So a speed change never makes progress jump, and a tick
-// that runs late (background tab) still gives the right numbers.
-let flight = null;
-const chkPomo  = document.getElementById('chk-pomo');
-const speedSel = document.getElementById('speed-sel');
-const btnStop  = document.getElementById('btn-stop');
-
-function selectedSpeed() { return parseFloat(speedSel.value) || 1; }
-function findCity(name) { return CITIES.find(c => c.n === String(name).trim().toLowerCase()); }
-function newFlightId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
-function flightVirt(now) { return flight.virtMs + (now - flight.lastT) * flight.speed; }
-function flightProgress(now) { return flight.landed ? 1 : Math.min(1, flightVirt(now) / flight.totalMs); }
-
-// The flight in the air is kept on this device so a refresh (or reopening the tab)
-// carries on where it was. Only the unfinished flight lives here; finished flights are
-// in Firestore. If the browser clears this, only the current flight is lost.
-const ACTIVE_KEY = 'activeFlight';
-function persistFlight() {
-  try {
-    if (!flight || flight.landed) { localStorage.removeItem(ACTIVE_KEY); return; }
-    localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      v:1, id:flight.id, from:flight.from.n, to:flight.to.n, startT:flight.startT,
-      virtMs:flight.virtMs, lastT:flight.lastT, speed:flight.speed, sped:flight.sped,
-      pomoStart: pomo ? pomo.start : null,
-    }));
-  } catch(e) {}
-}
-function restoreFlight() {
-  let s = null;
-  try { s = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch(e) {}
-  if (!s || s.v !== 1) return;
-  const from = findCity(s.from), to = findCity(s.to);
-  if (!from || !to || from === to) { try { localStorage.removeItem(ACTIVE_KEY); } catch(e) {} return; }
-  launch({ ...s, from, to }, true);
-}
-
-function startFlight(from, to) {
-  stopFlight();
-  const now = Date.now(), speed = selectedSpeed();
-  launch({ id:newFlightId(), from, to, startT:now, virtMs:0, lastT:now, speed,
-           sped: speed > 1, pomoStart: chkPomo.checked ? now : null }, false);
-}
-
-function launch(s, restored) {
-  const km = haversine(s.from.lat, s.from.lng, s.to.lat, s.to.lng);
-  flight = { id:s.id, from:s.from, to:s.to, km, totalMs:(km/900)*3600000,
-             startT:s.startT, virtMs:s.virtMs, lastT:s.lastT, speed:s.speed, sped:!!s.sped,
-             landed:false, halfwayChimed:false };
-  const now = Date.now();
-  pomo = s.pomoStart != null ? { start:s.pomoStart, onBreak:false } : null;
-  if (pomo) pomo.onBreak = pomoPhase(now).onBreak;               // no chime for the current phase
-  if (restored) flight.halfwayChimed = flightProgress(now) >= 0.5; // or for a halfway already passed
-  chkPomo.checked = !!pomo; chkPomo.disabled = true;
-  speedSel.value = String(flight.speed);
-  btnStop.style.display = '';
-  persistFlight();
-  if (!restored) playChime('takeoff');
-  tick();
-}
-
-function tick() {
-  if (!flight || flight.landed) return;
-  const now = Date.now();
-  const virt = flightVirt(now);
-  if (virt >= flight.totalMs) { land(); return; }
-  const p = virt / flight.totalMs;
-  if (pomo) {
-    const onBreak = pomoPhase(now).onBreak;
-    if (onBreak !== pomo.onBreak) { pomo.onBreak = onBreak; playChime(onBreak ? 'break' : 'resume'); }
-  }
-  if (p >= 0.5 && !flight.halfwayChimed) { flight.halfwayChimed = true; playChime('halfway'); }
-  updateBanner(p);
-  const km = Math.round(flight.km);
-  document.getElementById('progress-bar').style.width = (p*100).toFixed(1)+'%';
-  document.getElementById('status').textContent = (p*100).toFixed(1)+'% · '+Math.round(p*flight.km)+' / '+km+' km';
-}
-
-function land() {
-  // the exact moment it reached 100%, even if this tick ran late or the page was closed
-  const landT = Math.max(flight.startT, flight.lastT + (flight.totalMs - flight.virtMs) / flight.speed);
-  flight.landed = true;
-  pomo = null;
-  chkPomo.disabled = false;
-  btnStop.style.display = 'none';
-  persistFlight(); // clears the stored in-progress flight
-  updateBanner(1);
-  document.getElementById('progress-bar').style.width = '100%';
-  document.getElementById('status').textContent = 'landed! '+Math.round(flight.km)+' km';
-  playChime('landing');
-  saveToHistory(flight, landT);
-}
-
-function stopFlight() {
-  flight = null; pomo = null;
-  persistFlight(); // clears the stored in-progress flight
-  chkPomo.disabled = false;
-  resetBanner();
-  document.getElementById('progress-bar').style.width='0';
-  document.getElementById('status').textContent='ready';
-  btnStop.style.display='none';
-}
-
-speedSel.addEventListener('change', () => {
-  if (!flight || flight.landed) return;
-  tick();                        // land first if it was already due at the old speed
-  if (flight.landed) return;
-  const now = Date.now();
-  flight.virtMs = flightVirt(now); flight.lastT = now;
-  flight.speed = selectedSpeed();
-  if (flight.speed > 1) flight.sped = true;
-  persistFlight();
-  tick();
-});
-
-// Background tabs slow normal timers right down (Chrome: to once a minute), which made
-// chimes, pomodoro switches and the landing save late. A tiny Web Worker's timer is not
-// slowed as much, so it drives tick(). Fallback: plain setInterval.
-(function startTicker() {
-  try {
-    const src = 'setInterval(function(){postMessage(0)},500)';
-    const w = new Worker(URL.createObjectURL(new Blob([src], { type:'text/javascript' })));
-    w.onmessage = tick;
-  } catch(e) {
-    setInterval(tick, 500);
-  }
-})();
-// Coming back to the tab or phone: catch up straight away and wake the audio.
-function onReturn() {
-  if (document.hidden) return;
-  if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
-  tick();
-}
-document.addEventListener('visibilitychange', onReturn);
-window.addEventListener('pageshow', onReturn);
-window.addEventListener('focus', onReturn);
-
-document.getElementById('btn-fly').addEventListener('click', () => {
-  const from = findCity(document.getElementById('inp-from').value);
-  const to   = findCity(document.getElementById('inp-to').value);
-  if (!from) { alert('departure city not found'); return; }
-  if (!to)   { alert('destination city not found'); return; }
-  if (from === to) { alert('pick two different cities'); return; }
-  startFlight(from, to);
-});
-
-// ── Flight history (stored via db.js) ─────────────────────
-// db.js is a module that loads after this script; wait for it before any database call.
-const dbReady = new Promise(res => {
-  if (window.DB) res(window.DB);
-  else window.addEventListener('db-ready', () => res(window.DB), { once: true });
-});
-function ddmmyyyy(d) {
-  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
-}
-
-// f = the landed flight, landT = the real time it landed.
-// The flight's own id is reused as the document id, so if two open tabs both land the
-// same flight, the second save is refused by the rules (no edits) instead of duplicating.
-async function saveToHistory(f, landT) {
-  try {
-    const DB = await dbReady;
-    const h = await DB.loadFlights();
-    await DB.addFlight({
-      id: f.id,
-      seq: h.reduce((m,x) => Math.max(m, x.seq), 0) + 1,
-      from:f.from.n, to:f.to.n, km:Math.round(f.km),
-      dur:formatDur(f.km/900),
-      realDur: f.sped ? formatDur((landT - f.startT)/3600000) : null,
-      date:ddmmyyyy(new Date(landT)),
-      // summable numbers for stats (see REVAMP.md phase 0); realMin will exclude pauses
-      flightMin: Math.round(f.totalMs / 60000),
-      realMin: Math.round((landT - f.startT) / 60000),
-      startedAt: new Date(f.startT),
-      endedAt: new Date(landT)
-    });
-  } catch(e) {
-    console.error(e);
-    alert("couldn't save this flight — check your connection");
-  }
-}
-
-async function deleteHistory(id) {
-  try {
-    const DB = await dbReady;
-    await DB.deleteFlight(id);
-  } catch(e) {
-    console.error(e);
-    alert("couldn't delete — check your connection");
-  }
-  await renderHistory();
-}
-
-async function renderHistory() {
-  const list = document.getElementById('hist-list');
-  let h;
-  try {
-    const DB = await dbReady;
-    h = await DB.loadFlights();
-  } catch(e) {
-    console.error(e);
-    list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:#2a5a8a">couldn\'t load flights — check your connection.</div>';
-    return;
-  }
-  if (!h.length) {
-    list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:#2a5a8a">no completed flights yet.</div>';
-    return;
-  }
-  // Anyone with the link can add a flight, so nothing from the database is ever turned
-  // into HTML: every value goes in as plain text (textContent), and the ✕ is wired up
-  // directly instead of pasting the id into code.
-  const span = (text, css) => {
-    const s = document.createElement('span');
-    s.textContent = String(text); s.style.cssText = css;
-    return s;
-  };
-  list.replaceChildren(...h.map(f => {
-    const row = document.createElement('div');
-    row.className = 'hist-row';
-    const del = span('✕', 'color:#5a1e1e;cursor:pointer;font-size:15px');
-    del.addEventListener('mouseover', () => del.style.color = '#ff7e7e');
-    del.addEventListener('mouseout',  () => del.style.color = '#5a1e1e');
-    del.addEventListener('click', () => deleteHistory(f.id));
-    row.append(
-      span(f.from+' → '+f.to, 'color:#7ec8ff'),
-      span(f.km+' km · '+f.dur+(f.realDur ? ' · '+f.realDur+' real' : ''), 'color:#2a6a9a;margin:0 10px'),
-      span(f.date, 'color:#2a5a8a;margin-right:10px'),
-      del
-    );
-    return row;
-  }));
-}
-document.getElementById('btn-hist').addEventListener('click', () => {
-  const p = document.getElementById('hist-panel');
-  const showing = p.style.display==='block';
-  p.style.display = showing?'none':'block';
-  if (!showing) renderHistory();
-});
-
-// ── Autocomplete ──────────────────────────────────────────
-const acEl = document.getElementById('ac');
-function setupAC(inputId) {
-  const inp = document.getElementById(inputId);
-  inp.addEventListener('input', () => {
-    const v = inp.value.trim().toLowerCase();
-    if (!v) { acEl.style.display='none'; return; }
-    const hits = CITIES.filter(c=>c.n.toLowerCase().includes(v)).slice(0,8);
-    if (!hits.length) { acEl.style.display='none'; return; }
-    const ir = inp.getBoundingClientRect();
-    const wr = document.getElementById('wrap').getBoundingClientRect();
-    acEl.style.left=(ir.left-wr.left)+'px';
-    acEl.style.top=(ir.top-wr.top-hits.length*36-8)+'px';
-    acEl.style.width=ir.width+'px';
-    acEl.style.display='block';
-    acEl.innerHTML=hits.map(c=>
-      '<div class="ac-item" onmousedown="pickCity(\''+inputId+'\',\''+c.n.replace(/'/g,"&#39;")+'\')">'+c.n+'</div>'
-    ).join('');
-  });
-  inp.addEventListener('blur',()=>setTimeout(()=>acEl.style.display='none',150));
-}
-function pickCity(id, name) {
-  document.getElementById(id).value = name;
-  acEl.style.display = 'none';
-}
-setupAC('inp-from');
-setupAC('inp-to');
-
-function drawPomoCircle() {
-  if (!pomo) return;
-  const ph = pomoPhase(Date.now());
-  const fraction = 1 - ph.left / ph.limit;
-  const pad = 14, offset = 112; // below the real-time circle
-  const cx = pad + 48, cy = pad + 48 + offset, cr = 36;
-
-  // background
-  ctx.beginPath(); ctx.arc(cx, cy, cr+8, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(10,20,40,0.80)'; ctx.fill();
-
-  // track
-  ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI*2);
-  ctx.strokeStyle = pomo.onBreak ? 'rgba(255,180,80,0.15)' : 'rgba(74,172,255,0.15)';
-  ctx.lineWidth = 6; ctx.stroke();
-
-  // depleting arc
-  const start = -Math.PI/2;
-  const end = start + (1 - fraction) * Math.PI * 2;
-  ctx.beginPath(); ctx.arc(cx, cy, cr, start, end);
-  ctx.strokeStyle = pomo.onBreak ? '#ffb450' : '#4aacff';
-  ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
-
-  // label
-  const remMs = ph.left;
-  const remSec = Math.ceil(remMs / 1000);
-  const m = Math.floor(remSec / 60), s = remSec % 60;
-  const line1 = m > 0 ? m + 'm' : s + 's';
-  const line2 = pomo.onBreak ? 'break' : 'focus';
-
-  ctx.textAlign = 'center';
-  ctx.font = 'bold 13px monospace';
-  ctx.fillStyle = pomo.onBreak ? '#ffb450' : '#5ab0ff';
-  ctx.fillText(line1, cx, cy - 4);
-  ctx.font = '11px monospace';
-  ctx.fillStyle = pomo.onBreak ? 'rgba(255,180,80,0.6)' : 'rgba(180,220,255,0.6)';
-  ctx.fillText(line2, cx, cy + 12);
-  ctx.textAlign = 'left';
-}
-function drawGlobe() {
-  ctx.beginPath();
-  ctx.arc(W/2,H/2,R,0,Math.PI*2);
-  ctx.fillStyle='#0d2a4a'; ctx.fill();
-  if (geo) {
-    ctx.fillStyle='#1a3d28'; ctx.strokeStyle='#2a5a3a'; ctx.lineWidth=0.6;
-    for (const f of geo.features) {
-      const polys = f.geometry.type==='Polygon'?[f.geometry.coordinates]:f.geometry.coordinates;
-      for (const poly of polys) {
-        for (const ring of poly) {
-          ctx.beginPath(); let pen=false;
-          for (const [lng,lat] of ring) {
-            const p=projectLL(lat,lng);
-            if (!p.vis){pen=false;continue;}
-            pen?ctx.lineTo(p.sx,p.sy):ctx.moveTo(p.sx,p.sy); pen=true;
-          }
-          ctx.fill(); ctx.stroke();
-        }
-      }
-    }
-  }
-  ctx.beginPath(); ctx.arc(W/2,H/2,R,0,Math.PI*2);
-  ctx.strokeStyle='rgba(50,120,220,0.3)'; ctx.lineWidth=1; ctx.stroke();
-}
-
-function drawCities() {
-  ctx.font='10px sans-serif';
-  for (const c of CITIES) {
-    const p=projectLL(c.lat,c.lng);
-    if (!p.vis) continue;
-    ctx.beginPath(); ctx.arc(p.sx,p.sy,3,0,Math.PI*2);
-    ctx.fillStyle='#5ab0ff'; ctx.fill();
-    ctx.fillStyle='rgba(180,220,255,0.85)';
-    ctx.fillText(c.n,p.sx+5,p.sy-3);
-  }
-}
-
-function drawFlight() {
-  const {from,to}=flight, prog=flightProgress(Date.now()); // per frame, so the plane moves smoothly
-  const p1=ll2xyz(from.lat,from.lng), p2=ll2xyz(to.lat,to.lng);
-  const steps=120;
-  ctx.setLineDash([4,4]); ctx.beginPath(); let pen=false;
-  for (let i=0;i<=steps;i++) {
-    const pt=slerp(p1,p2,i/steps), pj=project(...pt);
-    if (!pj.vis){pen=false;continue;}
-    pen?ctx.lineTo(pj.sx,pj.sy):ctx.moveTo(pj.sx,pj.sy); pen=true;
-  }
-  ctx.strokeStyle='rgba(74,172,255,0.3)'; ctx.lineWidth=1.5; ctx.stroke();
-  ctx.setLineDash([]); ctx.beginPath(); pen=false;
-  for (let i=0;i<=steps*prog;i++) {
-    const pt=slerp(p1,p2,i/steps), pj=project(...pt);
-    if (!pj.vis){pen=false;continue;}
-    pen?ctx.lineTo(pj.sx,pj.sy):ctx.moveTo(pj.sx,pj.sy); pen=true;
-  }
-  ctx.strokeStyle='rgba(74,172,255,0.9)'; ctx.lineWidth=2.5; ctx.stroke();
-  [from,to].forEach(c => {
-    const p=projectLL(c.lat,c.lng); if (!p.vis) return;
-    ctx.beginPath(); ctx.arc(p.sx,p.sy,5,0,Math.PI*2);
-    ctx.fillStyle='#5ab0ff'; ctx.fill();
-    ctx.font='bold 12px sans-serif'; ctx.fillStyle='#7ecfff';
-    ctx.fillText(c.n,p.sx+7,p.sy-4);
-  });
-  const pos=slerp(p1,p2,prog), pj=project(...pos);
-  if (pj.vis) { ctx.font='16px sans-serif'; ctx.fillStyle='#ffe080'; ctx.fillText('✈',pj.sx-8,pj.sy+6); }
-}
-
-function drawTimer() {
-  const speed=flight.speed;
-  const remFlight=Math.max(0, flight.totalMs-flightVirt(Date.now()));
-  const remReal=remFlight/speed;
-  const singleRow=speed===1;
-  const line1='✈  '+formatTime(remFlight);
-  const line2=singleRow?null:'⏱  '+formatTime(remReal);
-  const pad=14;
-  ctx.font='bold 14px monospace';
-  const tw=Math.max(ctx.measureText(line1).width,line2?ctx.measureText(line2).width:0);
-  const bw=tw+24, bh=singleRow?58:78, bx=W-pad-bw, by=pad;
-  ctx.fillStyle='rgba(10,20,40,0.80)';
-  ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,6); ctx.fill();
-  ctx.font='10px sans-serif'; ctx.fillStyle='rgba(120,180,255,0.4)';
-  ctx.fillText('study session',bx+12,by+14);
-  ctx.font='bold 14px monospace'; ctx.fillStyle='#5ab0ff';
-  ctx.fillText(line1,bx+12,by+32);
-  if (line2) { ctx.fillStyle='rgba(180,220,255,0.55)'; ctx.fillText(line2,bx+12,by+52); }
-}
-
-function drawCircleTimer() {
-  const now=Date.now();
-  const remReal=Math.max(0, flight.totalMs-flightVirt(now))/flight.speed;
-  const fraction=flightProgress(now);
-  const pad=14, cx=pad+48, cy=pad+48, cr=36;
-  ctx.beginPath(); ctx.arc(cx,cy,cr+8,0,Math.PI*2);
-  ctx.fillStyle='rgba(10,20,40,0.80)'; ctx.fill();
-  ctx.beginPath(); ctx.arc(cx,cy,cr,0,Math.PI*2);
-  ctx.strokeStyle='rgba(74,172,255,0.15)'; ctx.lineWidth=6; ctx.stroke();
-  const start=-Math.PI/2, end=start+fraction*Math.PI*2;
-  ctx.beginPath(); ctx.arc(cx,cy,cr,start,end);
-  ctx.strokeStyle='#4aacff'; ctx.lineWidth=6; ctx.lineCap='round'; ctx.stroke(); ctx.lineCap='butt';
-  const t=Math.ceil(remReal/1000);
-  const h=Math.floor(t/3600), m=Math.floor((t%3600)/60), s=t%60;
-  const line1=h>0?h+'h':m+'m';
-  const line2=h>0?String(m).padStart(2,'0')+'m':String(s).padStart(2,'0')+'s';
-  ctx.textAlign='center';
-  ctx.font='bold 13px monospace'; ctx.fillStyle='#5ab0ff'; ctx.fillText(line1,cx,cy-4);
-  ctx.font='11px monospace'; ctx.fillStyle='rgba(180,220,255,0.6)'; ctx.fillText(line2,cx,cy+12);
-  ctx.textAlign='left';
-}
-
-function drawBanner() {
-  if (banner.fading) {
-    banner.opacity-=0.03;
-    if (banner.opacity<=0) { banner.current=banner.next; banner.next=null; banner.fading=false; banner.opacity=0; }
-  } else if (banner.opacity<1) {
-    banner.opacity=Math.min(1,banner.opacity+0.03);
-  }
-  ctx.save();
-  ctx.font='600 14px sans-serif';
-  ctx.globalAlpha=Math.max(0,banner.opacity);
-  const tw=ctx.measureText(banner.current).width;
-  const bw=tw+28, bh=30, bx=W/2-bw/2, by=H*0.1;
-  ctx.fillStyle='rgba(10,20,40,0.75)';
-  ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill();
-  ctx.fillStyle='rgba(180,220,255,0.9)';
-  ctx.fillText(banner.current,bx+14,by+20);
-  ctx.restore();
-}
-
-function loop() {
-  ctx.clearRect(0,0,W,H);
-  if (!dragging) {
-    vX*=0.9; vY*=0.9; rotY+=vY; rotX+=vX;
-    rotX=Math.max(-1.4,Math.min(1.4,rotX));
-  }
-  drawGlobe();
-  drawCities();
-  drawBanner();
-  if (flight) drawFlight();                      // a landed route stays on the globe
-  if (flight && !flight.landed) drawTimer();
-  if (flight && !flight.landed) drawCircleTimer();
-  drawPomoCircle();                              // draws nothing when pomo is off or landed
-  requestAnimationFrame(loop);
-}
-loop();
-restoreFlight(); // pick up a flight that was in the air before a refresh
-</script>
 </body>
 </html>

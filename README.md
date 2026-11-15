@@ -5,30 +5,35 @@ pick two cities, press fly, and study for as long as the flight takes.
 
 **live:** https://kathiir17.github.io/drish-study-flight-tracker
 
-> this describes the app as of november 2026, before the planned ui overhaul.
+> a revamp is under way (see `REVAMP.md`). phase 1, the new interface, is done.
 
 ## how it works
 
-- **route:** choose a departure and destination from 70 cities (autocomplete). the
-  distance is the great-circle distance; the plane cruises at 900 km/h, so a
-  flight's duration is `km / 900` hours. london → paris is ~23 min; london → sydney
-  is ~19 h.
-- **the globe:** drag to rotate, scroll to zoom. the route is drawn as a dashed arc,
-  filled in as the plane flies.
-- **hud** (drawn on the globe canvas):
-  - top-left: circular countdown of the real time left
-  - below it: pomodoro circle (blue = focus, amber = break), if pomodoro is on
-  - top-right: study-session box with the flight time left (and real time left when
-    sped up)
-  - centre: a banner that fades between milestone messages
-- **pomodoro** (tick the box before flying): 50 min focus / 10 min break on real
-  wall-clock time. the flight keeps going during breaks.
+- **the screen:** a 3d globe under a night sky, with a floating sidebar (like apple
+  maps) holding the tabs: **fly**, **passes** (her flight history), **map** and **stats**
+  (both coming soon). the globe always stays in view beside it. on a phone the panel
+  docks at the bottom instead.
+- **choosing a route:** tap a city on the globe for the departure, tap another for the
+  destination, or type them (autocomplete, with arrow keys and enter). the card shows
+  the distance and how long the flight will be before she takes off. 70 cities.
+- **flight time:** great-circle distance at 900 km/h, so a flight lasts `km / 900`
+  hours. london → paris is ~23 min; london → sydney is ~19 h.
+- **the globe:** drag (mouse or finger) to turn it; scroll, pinch or trackpad-pinch to
+  zoom. the route is a dashed arc that fills in amber behind the plane.
+- **in flight:** the card shows the time left, distance flown and to go, and the
+  pomodoro ring (blue = focus, amber = break). messages at the top change at takeoff,
+  25%, halfway, 75% and landing. stopping needs two taps, and a stopped flight isn't saved.
+- **pomodoro:** switch it on and choose focus and break minutes (default 50 / 10,
+  remembered on each device). real wall-clock time; the flight keeps going during breaks.
+- **landing:** a summary card, with "fly onward" to start the next leg from there.
 - **chimes:** takeoff, halfway, landing, break and back-to-focus. sound starts working
   after the first tap or key press (a browser rule).
-- **speed** (1x–10000x): makes the flight go faster. it's there for testing; it can be
-  changed mid-flight without the progress jumping.
-- **history:** a flight is saved when it lands (not when stopped), newest first, with
-  distance, flight time, real time if it was sped up, and the date. ✕ deletes one.
+- **passes:** every landed flight, newest first, with date, distance, flight time and
+  real time if it was sped up. deleting one needs two taps.
+- **speed:** 1x–10000x, chosen before takeoff or changed mid-flight without the
+  progress jumping. sped-up flights record the real time spent too.
+- **as an app:** in safari, share → add to home screen (iphone/ipad) or file → add to
+  dock (mac) gives it its own icon and full-screen window.
 
 ### timing and reliability
 
@@ -47,10 +52,14 @@ pick two cities, press fly, and study for as long as the flight takes.
 
 | file | what it is |
 |---|---|
-| `index.html` | the whole app: html, css and js inline. no build step, no framework. |
-| `db.js` | the only file that talks to the database. exposes `window.DB` (`loadFlights`, `addFlight`, `deleteFlight`) and fires `db-ready`. |
+| `index.html` | page structure. no build step, no framework. |
+| `styles.css` | all styling; colours, type and spacing are tokens at the top. |
+| `app.js` | the app: globe drawing, touch, timing, pomodoro, audio, interface. |
+| `db.js` | the only file that talks to the database. exposes `window.DB` (`loadFlights`, `addFlight`, `deleteFlight`, `loadModules`, `addModule`) and fires `db-ready`. |
 | `firestore.rules` | database security rules (see below). |
-| `CLAUDE.md` | project notes for claude code. |
+| `manifest.webmanifest`, `icons/` | home-screen / dock app name and icon (`icon.svg` is the source). |
+| `tests/` | browser tests with a fake database (see `tests/README.md`). |
+| `REVAMP.md`, `CLAUDE.md` | the revamp plan, and project notes for claude code. |
 
 dependencies, all loaded from cdns: firebase sdk 10.12.2 (gstatic), topojson-client
 3.1.0 and world-atlas 2.0.2 (jsdelivr, for the country shapes). the jsdelivr files are
@@ -84,10 +93,10 @@ the folder:
 
 ```
 cd ~/code/drish-study-flight-tracker
-python3 -m http.server 8000
+python3 -m http.server 8001
 ```
 
-then open http://localhost:8000 (if port 8000 is taken, use another, e.g. 8001).
+then open http://localhost:8001.
 
 ⚠️ local runs use the **live** database: test flights appear in drish's history.
 delete them afterwards.
@@ -101,6 +110,8 @@ named `index.html`.
 
 ## known limitations
 
+- **the globe doesn't turn to face your route** yet, so a route over the far side needs a
+  drag to see.
 - **the globe needs the internet:** country shapes come from a cdn, so the page doesn't
   load fully offline (saved flights are still safe).
 - **iphone, locked or in another app:** ios pauses the page completely, so chimes can't
@@ -109,4 +120,3 @@ named `index.html`.
 - **iphone silent switch** mutes the chimes.
 - **anyone with the link can delete flights.** there's no sign-in, so the rules can't
   tell drish apart from anyone else. fixing this needs some form of sign-in.
-- `ctx.roundRect` (hud boxes) needs safari 16+.

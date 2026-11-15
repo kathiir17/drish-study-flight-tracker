@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="100%" r="110%">
+      <stop offset="0" stop-color="#13285a"/><stop offset=".55" stop-color="#081430"/><stop offset="1" stop-color="#040914"/>
+    </radialGradient>
+    <radialGradient id="ocean" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#2a5d97"/><stop offset=".6" stop-color="#11305c"/><stop offset="1" stop-color="#081a38"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset=".78" stop-color="#6eaaff" stop-opacity=".45"/><stop offset="1" stop-color="#6eaaff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#sky)"/>
+  <g fill="#e6eeff">
+    <circle cx="70" cy="80" r="3" opacity=".8"/><circle cx="150" cy="46" r="2" opacity=".6"/><circle cx="420" cy="70" r="3.5" opacity=".9"/>
+    <circle cx="460" cy="160" r="2" opacity=".6"/><circle cx="300" cy="40" r="2.2" opacity=".7"/><circle cx="40" cy="190" r="2" opacity=".5"/>
+    <circle cx="230" cy="110" r="1.8" opacity=".5"/>
+  </g>
+  <circle cx="300" cy="420" r="250" fill="url(#glow)"/>
+  <circle cx="300" cy="420" r="205" fill="url(#ocean)"/>
+  <clipPath id="ball"><circle cx="300" cy="420" r="205"/></clipPath>
+  <g clip-path="url(#ball)" fill="none" stroke="#9cc4ff" stroke-opacity=".22" stroke-width="3">
+    <ellipse cx="300" cy="420" rx="205" ry="70"/><ellipse cx="300" cy="300" rx="170" ry="45"/>
+    <ellipse cx="300" cy="420" rx="80" ry="205"/><ellipse cx="300" cy="420" rx="160" ry="205"/>
+  </g>
+  <path d="M96 300C150 170 290 110 420 150" fill="none" stroke="#ffbd5a" stroke-width="22" stroke-linecap="round" opacity=".35" filter="url(#soft)"/>
+  <path d="M96 300C150 170 290 110 420 150" fill="none" stroke="#ffbd5a" stroke-width="10" stroke-linecap="round"/>
+  <g transform="translate(424 152) rotate(17) scale(4.2)" fill="#fff4dc">
+    <path d="M11 0 7-1.6H1L-3-9h-3l3 7.4h-5l-2-2.9h-2l1.5 4.5L-12 4.5h2l2-2.9h5L-6 9h3l4-7.4h6z"/>
+  </g>
+</svg>

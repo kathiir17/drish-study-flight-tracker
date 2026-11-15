@@ -9,14 +9,18 @@ The filename must stay `index.html` for Pages to serve it.
 - No branch. Check locally, then commit and push to main together.
 - Local: `python3 -m http.server 8001` → http://localhost:8001 (8000 is used by another
   project). Local runs use the LIVE database.
-- Logic can be tested without a browser: macOS ships Safari's JS engine at
-  `/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc`
-  (no node installed). Stub the DOM and clock, load the inline script, fast-forward time.
+- Tests: `tests/` (Playwright + WebKit, fake database; see tests/README.md). Run
+  `tests/behaviour.py` after every change and look at `tests/screenshots.py` output.
+  Playwright (Python) + WebKit are installed; no node, no Chrome on this Mac.
+- Drish uses Safari, mainly on Mac and iPad, rarely iPhone, via the link (no home-screen app yet).
 
 ## Stack
-- `index.html` (inline CSS/JS, no build step, no framework) plus `db.js`, the only file
-  that talks to the database. `db.js` is an ES module (blocked on file://), exposes
-  `window.DB` and fires `db-ready`; index.html awaits it via the `dbReady` promise.
+- No build step, no framework. `index.html` (structure), `styles.css` (design tokens on
+  `:root`, then components), `app.js` (everything except the database, in labelled
+  sections), `db.js` (the only file that talks to Firebase; an ES module, blocked on
+  file://, exposes `window.DB` and fires `db-ready`; app.js awaits it via `dbReady`).
+- Home-screen / dock app: `manifest.webmanifest`, `icons/` (icon.svg is the source;
+  PNGs rendered from it with Playwright), apple meta tags in index.html.
   Firestore's offline cache (IndexedDB) keeps a flight landed without a connection and
   uploads it later.
 - Firebase Firestore, project `drish-flight-study-tracker`, no auth.
@@ -43,16 +47,26 @@ The filename must stay `index.html` for Pages to serve it.
 - Test in Safari (incl. iPhone) as well as Chrome. She's fully on Apple devices.
 - Anything from the database is shown with textContent, never innerHTML (anyone can add).
 
-## How the app behaves (pre-revamp)
-- Pick from/to (70 cities, autocomplete, exact lowercase name). Great-circle distance
-  at 900 km/h, so duration = km/900 (to be replaced in phase 2).
+## How the app behaves
+- UI: full-screen globe + star field, with an Apple Maps-style floating sidebar panel
+  (`#panel`): tabs (fly, passes, map, stats) across its top, content below, sized to its
+  content. ≥700px wide it sits top-left and the globe centres in the space to its right;
+  narrower it docks at the bottom and the globe sits above. app.js measures the panel
+  (`computeLayout`, ResizeObserver) and eases the globe into place; `--globe-cx` centres
+  the top message pill over the globe. Fly tab: plan → flying → landed blocks, plus a
+  speed segmented control (1x–10000x) shown before takeoff and in flight.
+- Pick from/to by tapping cities on the globe (1st = from, 2nd = to) or typing
+  (autocomplete with country, arrow keys). Pointer events handle mouse, touch drag and
+  pinch; Safari trackpad pinch comes as gesture events. Great-circle distance at
+  900 km/h, so duration = km/900 (to be replaced in phase 2).
 - Timing is clock-based: `flight.virtMs` at `flight.lastT` plus `(now - lastT) × speed`.
   Never count ticks. A Web Worker drives `tick()`; `visibilitychange` catches up.
-- Speed select (1x–10000x) is for testing; can change mid-flight without jumping.
+- Speed can change mid-flight without jumping.
 - The in-progress flight is in localStorage (`activeFlight`) and resumes on reload;
   a flight that landed while closed is saved with its real landing time.
-- Pomodoro: 50 min focus / 10 min break on real time, phase derived from the clock.
-  For testing, temporarily set POMO_FOCUS/POMO_BREAK to 20s/10s, then change back.
+- Pomodoro: custom focus/break minutes (default 50/10, remembered per device in
+  `pomoPrefs`); each flight stores its own lengths. Phase derived from the clock.
+- Stop and delete both need two taps.
 - Chimes (Web Audio, synthesised): takeoff, halfway, landing, break, resume. None at
   25/75%. Audio unlocks on first tap (iOS silent-buffer trick).
 - History is saved only on landing, not on stop.
@@ -63,8 +77,12 @@ The filename must stay `index.html` for Pages to serve it.
   are matched to that. Don't "tidy" these without testing orientation and drag direction.
 - Fly-to-city was attempted three times and always landed wrong. If retried, derive the
   target rotation from `project()` and verify with a debug readout.
-- HUD elements use hardcoded pixel offsets in canvas draw functions (phase 1 replaces this).
-- `ctx.roundRect` needs Safari 16+.
+- Zoom keeps the globe's circle fixed (`baseR`) and magnifies inside it (`R = baseR × zoom`,
+  zoom 1–4). `project().vis` = near side AND inside the circle; drawGlobe clips to `baseR`.
+  The panel slims (332 → 296px) in flight via `body.in-flight`.
+- Country fills push far-side points to the globe's edge (so shapes crossing the edge hug
+  it); borders are drawn on the near side only.
+- The globe does not turn to face the chosen route (see REVAMP.md, parked).
 
 ## Known limitations
 - The globe needs jsdelivr, so the page doesn't fully work offline (data is safe).
