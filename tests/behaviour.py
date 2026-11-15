@@ -8,7 +8,7 @@ const flights = [
   {id:'new1', seq:3, from:'london', to:'paris', km:343, dur:'42m 01s', realDur:null, date:'14/11/2026', flightMin:42, realMin:42,
    startedAt:'2026-11-14T09:00:00Z', endedAt:'2026-11-14T09:42:00Z', module:'cardiology'},
   {id:'evil', seq:2, from:'<img src=x onerror="window.__xss=1">', to:'<b>bold</b>', km:1, dur:'1m', realDur:null, date:'01/01/2026'},
-  {id:'a1', seq:1, from:'jaffna', to:'singapore', km:2580, dur:'2h 52m', realDur:null, date:'02/11/2026'},
+  {id:'a1', seq:1, from:'jaffna', to:'singapore', km:2580, dur:'2h 52m', realDur:null, date:'02/11/2026', flightMin:172, realMin:172},
 ];
 window.__saved = []; window.__deleted = [];
 window.DB = {
@@ -458,6 +458,13 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/pass-4-landed.png")
     page.wait_for_timeout(2800)
     ok(page.locator("#pass-dock .pass").count() == 0 and page.is_hidden("#pass-dock"), "then it flies off into the passes tab")
+    nb = page.inner_text("#ld-badge") if page.is_visible("#ld-badge") else ""
+    ok("the amazon" in nb and "long haul" in nb, "the landed card shows badges this flight earned: " + nb.replace("\n", " "))
+    page.click("#ld-badge .badge-link:has-text('long haul')"); page.wait_for_timeout(900)
+    ok(page.is_visible("#view-stats") and page.locator(".badge.flash[data-badge='long']").count() == 1, "tapping a new badge opens it in stats, glowing")
+    bt, pt, pb = page.evaluate("[document.querySelector(\".badge[data-badge='long']\").getBoundingClientRect().top, ...(r => [r.top, r.bottom])(document.querySelector('.panel-body').getBoundingClientRect())]")
+    ok(pt <= bt <= pb, f"and scrolled into view ({bt:.0f} within {pt:.0f}–{pb:.0f})")
+    page.click(".tab[data-view=fly]"); page.wait_for_timeout(200)
     ok(page.evaluate("window.__saved.length") == 1, "and the flight is saved")
 
     print("boarding passes: stopping")
@@ -476,7 +483,7 @@ with sync_playwright() as p:
     ok(newp.locator(".pass-code").all_inner_texts() == ["LHR", "CDG"] and "cardiology" in newp.inner_text(), "a new flight's pass: LHR → CDG, cardiology")
     ok("14 november 2026" in newp.inner_text() and "departs" in newp.inner_text() and "arrives" in newp.inner_text(), "with its date and departure/arrival times")
     oldp = page.locator("#hist-list .pass[data-id='a1']")
-    ok("before modules" in oldp.inner_text() and "departs" not in oldp.inner_text() and "2 november 2026" in oldp.inner_text(), "an old flight's pass: 'before modules', no times")
+    ok("uncategorised" in oldp.inner_text() and "before modules" not in oldp.inner_text() and "departs" not in oldp.inner_text() and "2 november 2026" in oldp.inner_text(), "a flight with no module or times: 'uncategorised', no times")
     total = page.evaluate("lastHistory.reduce((s, f) => s + (Number(f.km) || 0), 0)")
     ok(page.inner_text("#hist-total") == f"{total:,} km", f"total: {page.inner_text('#hist-total')}")
     page.click("[data-unit='mi']")
@@ -601,7 +608,7 @@ with sync_playwright() as p:
     page.select_option("#map-module", label="cardiology")
     ok(page.inner_text("#map-summary").startswith("2 flights"), "module filter: cardiology")
     page.select_option("#map-module", label="uncategorised")
-    ok(page.inner_text("#map-summary").startswith("1 flight "), "uncategorised leaves out flights from before modules")
+    ok(page.inner_text("#map-summary").startswith("2 flights"), "module filter: uncategorised")
     page.select_option("#map-module", label="all modules")
     page.evaluate("const i = document.getElementById('map-d0'); i.value = dayNum(new Date(2026, 10, 11)); i.dispatchEvent(new Event('input'))")
     ok(page.inner_text("#map-summary").startswith("3 flights") and "11 nov" in page.inner_text("#map-dates"), "date slider: from 11 nov on " + page.inner_text("#map-dates"))
@@ -617,7 +624,7 @@ with sync_playwright() as p:
     page.click("#map-dates")
     ok(page.is_hidden("#map-custom"), "tapping the dates again closes the pickers")
     page.click("[data-preset=all]")
-    ok(page.inner_text("#map-summary").startswith("5 flights"), "the 'all' preset brings everything back, old flights included")
+    ok(page.inner_text("#map-summary").startswith("5 flights"), "the 'all' preset brings everything back")
     page.screenshot(path="/tmp/map-all.png")
 
     page.evaluate("cam.auto = viewCentredOn(ll2xyz(48.86, 2.35), 3)"); page.wait_for_timeout(2500)
@@ -636,6 +643,34 @@ with sync_playwright() as p:
     page.mouse.click(1400, 60); page.wait_for_timeout(200)
     ok(page.is_hidden("#map-detail"), "tapping empty space closes them")
     ok(page.evaluate("window.__xss") is None, "junk from the database isn't drawn or run")
+
+    print("stats")
+    page.click(".tab[data-view=stats]"); page.wait_for_timeout(600)
+    tiles = page.evaluate("[...document.querySelectorAll('.stat-tile')].map(t => t.innerText.replace(/\\n/g, ' '))")
+    ok(tiles == ['30 h 44 min studied', '6 flights', '28,815 km flown', '4 countries'], "headline numbers, real study time " + str(tiles))
+    bars = page.evaluate("[...document.querySelectorAll('.mod-bar .mod-name')].map(t => t.textContent)")
+    ok(bars == ['anatomy', 'cardiology', 'uncategorised'] and "before modules" not in page.inner_text("#stats-body"), "time per module: biggest first, uncategorised last " + str(bars))
+    recs = page.inner_text(".records")
+    ok("new york → sydney" in recs and "12 nov" in recs and "15 h" in recs and "london → paris" in recs and "2 times" in recs, "records: longest flight, longest day, most flown, favourite " + recs.replace("\n", " | "))
+    ok("on 3 of 6 continents" in page.inner_text("#stats-body") and page.locator(".chip.static.lit").count() == 3, "places: continents landed on are lit")
+    ok("best 3" in page.inner_text("#stats-body") or "best streak: 3 days" in page.inner_text("#stats-body"), "best streak: 3 days")
+    ok(page.locator(".cal-day").count() == 84 and page.locator(".cal-day.l4").count() >= 1, "12-week study calendar, shaded by time")
+    earned = page.evaluate("[...document.querySelectorAll('.badge.earned .badge-name')].map(t => t.textContent)")
+    ok(sorted(earned) == sorted(['first flight', 'ten hours', 'bookworm', 'the amazon', 'straight through', 'the great wall', 'around mars', 'on a roll', 'long haul', 'marathon day']),
+       "badges earned " + str(earned))
+    nxt = page.inner_text(".badge.next")
+    ok("kangaroo" in nxt and "28,815 km of 33,980 km" in nxt and "next up" in nxt, "the closest badge comes next, with progress: " + nxt.replace("\n", " | "))
+    ok("badges · 10 of 35" in page.inner_text("#stats-body"), "badge count in the heading")
+    page.screenshot(path="/tmp/stats-top.png")
+    page.evaluate("document.querySelector('.panel-body').scrollTop = 99999"); page.wait_for_timeout(200)
+    page.screenshot(path="/tmp/stats-bottom.png")
+    page.click("[data-srange='7']"); page.wait_for_timeout(200)
+    ok(page.locator(".stat-tile").count() == 4 and "badges · 10 of 35" in page.inner_text("#stats-body"), "week view: numbers change, badges still count all time")
+    page.click("[data-srange='all']")
+    page.click(".mod-bar:has-text('cardiology')"); page.wait_for_timeout(800)
+    ok(page.is_visible("#view-map") and page.input_value("#map-module") == "cardiology" and page.inner_text("#map-summary").startswith("2 flights"),
+       "tapping a module bar opens the map filtered to it")
+    page.select_option("#map-module", label="all modules")
 
     print("flight map: replay")
     page.click("#btn-replay"); page.wait_for_timeout(150)

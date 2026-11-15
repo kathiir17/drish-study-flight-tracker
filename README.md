@@ -10,8 +10,7 @@ pick two cities, press fly, and study for as long as the flight takes.
 ## how it works
 
 - **the screen:** a 3d globe under a night sky, with a floating sidebar (like apple
-  maps) holding the tabs: **fly**, **passes** (her flight history), **map** and **stats**
-  (coming soon). the globe always stays in view beside it. on a phone the panel
+  maps) holding the tabs: **fly**, **passes** (her flight history), **map** and **stats**. the globe always stays in view beside it. on a phone the panel
   docks at the bottom instead.
 - **choosing a route:** tap a city on the globe for the departure, tap another for the
   destination, or type them (autocomplete, with arrow keys and enter). the card shows
@@ -47,7 +46,7 @@ pick two cities, press fly, and study for as long as the flight takes.
   passes tab. seat and gate are random-looking but fixed for each flight.
 - **passes tab:** every flight as a boarding pass, newest first, with the total distance
   flown (km or miles toggle). tapping a pass shows its route on the globe. deleting one
-  needs two taps. flights from before modules existed say "before modules".
+  needs two taps.
 - **map tab:** every landed flight drawn on the globe, coloured by the continent it
   landed in. a route flown more than once is one arc that gets thicker and brighter;
   cities she's landed in get a dot that grows with each landing (a place she's only
@@ -55,6 +54,15 @@ pick two cities, press fly, and study for as long as the flight takes.
   continent, module, and a date range slider (week / month / all, or tap the dates for
   exact from/to pickers), which covers every flight ever saved. a summary line counts flights, distance and countries. tapping a
   route or a city shows how many flights, time studied and when it was last flown.
+- **stats tab:** week / month / all time. headline numbers (time studied, flights,
+  distance, countries), time per module (tap a bar to see it on the map), records
+  (longest flight, longest study day, most flown route, favourite destination), places
+  (continents lit once landed on), the current and best streak with a 12-week study
+  calendar, and 35 badges (flights, hours, distances like the kangaroo route and around
+  the world, countries, streaks, one-offs). earned badges are lit, the rest show
+  progress, closest first. a landing that earns a badge says so on the landed card.
+  study time is real time (pauses left out). badges on the landed card can be tapped to
+  open them in the stats tab.
 - **replay:** a button on the map tab plays the filtered flights oldest first: a plane
   whizzes from a to b in 1.25 s (1x, 2x or 5x), leaving its arc, while the globe follows,
   a caption names each flight and the summary counts up. over 60 s it asks first and

@@ -133,15 +133,17 @@ split into 4a (map) and 4b (stats), pushed separately.
 - **4a flight map tab (built):** every landed route on the globe, coloured by destination
   continent; repeat routes merge into one thicker, brighter arc; landed-in cities get a dot
   sized by landings, departure-only cities a ring. filters: destination continent, module
-  (incl. uncategorised; pre-module flights only under "all"), date range slider with
+  (incl. uncategorised), date range slider with
   week/month/all and exact from/to pickers (tap the dates) (every flight has `date`, so old ones count). summary line (flights ·
   distance · countries landed in). tap a route or city for a details card. agreed rule:
   she has only "been" somewhere if she landed there. replay (built): plays the filtered flights oldest first, 1.25 s per whizz at 1x
   (2x/5x), caption + counting-up summary; over 60 s it asks first with suggestions (no
   length cap, no "new country" moments, by agreement). later ideas: colour-by switch (#5, low priority); short/long-haul filter not wanted for now.
-- **stats and achievements** (poker-app style awards): time per module, total distance,
-  longest flight, streaks, countries/continents visited, milestone badges. completed
-  flights only.
+- **4b stats and achievements (built):** see README "stats tab". decisions: study time =
+  realMin (real time, pauses out). her 23 older flights (all pre-phase-0) were given
+  modules (akt/osce alternating, kdot's call) and minutes from their durations on
+  2026-11-15, so the "before modules" case is gone everywhere. badges count all time and
+  open from the landed card. distance badges picked around her 29,572 km at the time (next: kangaroo route 33,980, satellite height 35,786, around the world 40,075).
 
 ## parked (don't start without kdot's go-ahead)
 

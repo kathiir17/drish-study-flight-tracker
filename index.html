@@ -142,6 +142,7 @@
     <div id="card-landed" class="block" hidden>
       <h2 id="ld-title" class="landed-title"></h2>
       <p id="ld-sub" class="landed-sub"></p>
+      <p id="ld-badge" class="landed-badge" hidden></p>
       <div class="actions">
         <button type="button" id="btn-onward" class="primary"></button>
         <button type="button" id="btn-new" class="quiet">new route</button>
@@ -216,10 +217,15 @@
 
   <!-- ── stats ───────────────────────────────────────── -->
   <section id="view-stats" class="view" aria-label="stats" hidden>
-    <div class="soon">
+    <header class="sheet-head">
       <h2>your stats</h2>
-      <p>hours per module, longest flights, streaks and the places you've been. coming soon, counting every flight you land.</p>
+    </header>
+    <div class="segmented stats-range" role="group" aria-label="time range">
+      <button type="button" data-srange="7" aria-pressed="false">week</button>
+      <button type="button" data-srange="30" aria-pressed="false">month</button>
+      <button type="button" data-srange="all" aria-pressed="true">all time</button>
     </div>
+    <div id="stats-body" class="stats-body"></div>
   </section>
   </div>
 </aside>

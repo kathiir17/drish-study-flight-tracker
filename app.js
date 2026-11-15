@@ -1053,6 +1053,12 @@ function renderState() {
     $('ld-title').textContent = `landed in ${f.to.n}`;
     $('ld-sub').textContent = `${fmtNum(f.km)} km and ${durWords(f.totalMs)} of ${f.module || 'study'}. lovely work.`;
     $('btn-onward').textContent = `fly onward from ${f.to.n}`;
+    // badges this landing earned: each one opens it in the stats tab
+    const nb = f.newBadges || [];
+    $('ld-badge').hidden = !nb.length;
+    $('ld-badge').replaceChildren(...(nb.length ? [el('span', 'landed-badge-lead', `new badge${nb.length > 1 ? 's' : ''} 🎉`),
+      ...nb.map(b => { const x = el('button', 'badge-link', `${b.icon} ${b.name}`); x.type = 'button'; x.title = 'see it in your stats';
+                       x.addEventListener('click', () => openBadge(b.id)); return x; })] : []));
     setPill(LANDED_MSG);
   }
 }
@@ -1438,6 +1444,7 @@ function showView(name) {
   if (name === 'passes') renderHistory();
   if (name === 'fly') { textCache.clear(); renderState(); tick(); }
   if (name === 'map' && prev !== 'map') { mapState.sel = null; renderMap(true); }
+  if (name === 'stats') renderStats();
   if (prev === 'map' && name !== 'map') {   // back from the map: return to the flight (or plan) being shown
     mapState.hover = null; stopReplay();
     const r = currentRoute();
@@ -1463,7 +1470,7 @@ async function saveToHistory(f, landT) {
   try {
     const DB = await dbReady;
     const h = await DB.loadFlights();
-    await DB.addFlight({
+    const rec = {
       id: f.id,
       seq: h.reduce((m,x) => Math.max(m, x.seq), 0) + 1,
       from:f.from.n, to:f.to.n, km:Math.round(f.km),
@@ -1476,9 +1483,16 @@ async function saveToHistory(f, landT) {
       startedAt: new Date(f.startT),
       endedAt: new Date(landT),
       module: f.module || null          // no module = uncategorised (the field is simply left out)
-    });
+    };
+    await DB.addFlight(rec);
+    // any badges this landing earned show on the landed card
+    try {
+      const had = earnedIds(h), now = BADGES.filter(b => earnedIds([...h, rec]).has(b.id) && !had.has(b.id));
+      if (now.length) { f.newBadges = now; if (flight === f) renderState(); }
+    } catch(e) { console.error(e); }
     if (activeView === 'passes') renderHistory();
     if (activeView === 'map') renderMap(false);
+    if (activeView === 'stats') renderStats();
   } catch(e) {
     console.error(e);
     setPill('couldn’t save this flight. check your connection.');
@@ -1529,19 +1543,17 @@ try { if (localStorage.getItem(UNIT_KEY) === 'mi') distUnit = 'mi'; } catch(e) {
 const fmtDist = km => distUnit === 'mi' ? `${fmtNum(km * 0.621371)} mi` : `${fmtNum(km)} km`;
 
 // What a pass shows, from a saved flight or from the flight in the air.
-// A saved flight without flightMin is from before modules existed: it gets a pass,
-// but phase 4's stats leave it out.
 function passFromRecord(f) {
   const start = asDate(f.startedAt), day = start || parseDDMMYYYY(f.date);
   return { id: String(f.id), from: String(f.from), to: String(f.to), fromCode: cityCode(f.from), toCode: cityCode(f.to),
            date: day ? dateWords(day) : String(f.date), dur: String(f.dur), km: Number(f.km) || 0,
-           module: f.module ? String(f.module) : null, legacy: f.flightMin == null,
+           module: f.module ? String(f.module) : null,
            departs: start, arrives: asDate(f.endedAt), status: 'landed', ...seatGate(f.id) };
 }
 function passFromFlight(fl) {
   return { id: fl.id, from: fl.from.n, to: fl.to.n, fromCode: fl.from.a, toCode: fl.to.a,
            date: dateWords(new Date(fl.startT)), dur: formatDur(fl.totalMs / 3600000), km: Math.round(fl.km),
-           module: fl.module, legacy: false, departs: new Date(fl.startT), arrives: null,
+           module: fl.module, departs: new Date(fl.startT), arrives: null,
            status: fl.paused ? 'holding' : 'boarding', ...seatGate(fl.id) };
 }
 
@@ -1595,7 +1607,7 @@ function buildPass(p, kind) {
   fields.append(field('seat', p.seat, 'mono'), field('gate', p.gate, 'mono'), field('distance', fmtDist(p.km), 'dist'));
   if (p.departs) fields.append(field('departs', timeWords(p.departs)));
   if (p.arrives) fields.append(field('arrives', timeWords(p.arrives)));
-  fields.append(field('module', p.module || (p.legacy ? 'before modules' : 'uncategorised'), 'wide' + (p.module ? '' : ' muted')));
+  fields.append(field('module', p.module || 'uncategorised', 'wide' + (p.module ? '' : ' muted')));
   main.append(top, route, fields);
   pass.append(main);
   setPassStatus(pass, p.status);
@@ -1839,13 +1851,8 @@ function shortDate(d) {
   const y = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : '';
   return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}${y}`;
 }
-// minutes she actually studied on a flight (older flights only have the "2h 52m" strings)
-function durStrMin(s) {
-  s = String(s || '');
-  const h = /(\d+)h/.exec(s), m = /(\d+)m/.exec(s), sec = /(\d+)s/.exec(s);
-  return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (sec ? +sec[1] / 60 : 0);
-}
-function studiedMin(f) { return Number.isFinite(f.realMin) ? f.realMin : durStrMin(f.realDur || f.dur); }
+// minutes she actually studied on a flight (real time, pauses left out)
+function studiedMin(f) { return Math.max(0, Number(f.realMin) || 0); }
 function minWords(min) { return min < 1 ? '0 min' : durWords(min * 60000); }
 function hexA(hex, a) {
   const n = parseInt(hex.slice(1), 16);
@@ -1854,7 +1861,7 @@ function hexA(hex, a) {
 
 const UNCAT = '\u0000uncategorised';   // the module filter's "uncategorised" value (can't clash with a name)
 const mapState = {
-  all: [],              // every flight that can be drawn: { from, to, day, mins, module, pre }
+  all: [],              // every flight that can be drawn: { from, to, day, mins, module }
   cont: 'all', module: 'all',
   min: 0, max: 0, d0: 0, d1: 0, loaded: false,
   routes: [], cities: new Map(),
@@ -1884,7 +1891,7 @@ async function renderMap(face) {
     const from = findCity(f.from), to = findCity(f.to), d = parseDDMMYYYY(f.date);
     if (!from || !to || from === to || !d) continue;    // only real routes can be drawn
     mapState.all.push({ seq: Number(f.seq) || 0, from, to, day: dayNum(d), mins: studiedMin(f), km: Number(f.km) || routeKm(from, to),
-                        module: typeof f.module === 'string' ? f.module : null, pre: !Number.isFinite(f.flightMin) });
+                        module: typeof f.module === 'string' ? f.module : null });
   }
   // the date range runs from her first flight to today; keep her choice if she'd set one
   const first = mapState.all.reduce((m, f) => Math.min(m, f.day), today);
@@ -1904,7 +1911,7 @@ async function renderMap(face) {
 
 function buildModuleOptions() {
   const names = [...new Set(mapState.all.filter(f => f.module).map(f => f.module))].sort((a, b) => a.localeCompare(b));
-  const hasUncat = mapState.all.some(f => !f.module && !f.pre);
+  const hasUncat = mapState.all.some(f => !f.module);
   const opts = [['all', 'all modules'], ...names.map(n => [n, n]), ...(hasUncat ? [[UNCAT, 'uncategorised']] : [])];
   if (!opts.some(o => o[0] === mapState.module)) mapState.module = 'all';
   mapEls.module.replaceChildren(...opts.map(([v, t]) => { const o = el('option', null, t); o.value = v; return o; }));
@@ -1914,7 +1921,7 @@ function buildModuleOptions() {
 // which flights pass the module and date filters (and the continent one, unless told not to)
 function mapMatches(f, withCont) {
   if (f.day < mapState.d0 || f.day > mapState.d1) return false;
-  if (mapState.module === UNCAT) { if (f.module || f.pre) return false; }
+  if (mapState.module === UNCAT) { if (f.module) return false; }
   else if (mapState.module !== 'all' && f.module !== mapState.module) return false;
   return !withCont || mapState.cont === 'all' || f.to.ct.id === mapState.cont;
 }
@@ -2247,6 +2254,257 @@ function showMapDetail() {
   head.append(words, close);
   const dl = el('dl', 'map-stats'); dl.append(...cells);
   mapEls.detail.replaceChildren(head, dl);
+}
+
+// ── Stats tab ─────────────────────────────────────────────
+// Her study in numbers. "Study time" is the real time she spent (realMin: pauses left
+// out, not the sped-up flight time). Every landed flight counts; one with no module is
+// uncategorised.
+// The week / month / all time choice changes the numbers, modules, records and places;
+// streaks, the calendar and the badges always count everything.
+const KM_WORLD = 40075;
+
+function statRec(f) {
+  const d = parseDDMMYYYY(f.date);
+  if (!d) return null;
+  let from = findCity(f.from), to = findCity(f.to);
+  if (!from || !to || from === to) from = to = null;
+  return {
+    day: dayNum(d), km: Number(f.km) || 0, mins: studiedMin(f), flightMins: Math.max(0, Number(f.flightMin) || 0),
+    module: typeof f.module === 'string' ? f.module : null,
+    from, to, st: asDate(f.startedAt), en: asDate(f.endedAt),
+  };
+}
+function dayTotals(recs) { const m = new Map(); for (const r of recs) m.set(r.day, (m.get(r.day) || 0) + r.mins); return m; }
+function streaks(recs) {   // days in a row with at least one landing
+  const days = new Set(recs.map(r => r.day)), sorted = [...days].sort((a, b) => a - b);
+  let best = 0, run = 0, prev = null;
+  for (const d of sorted) { run = prev === d - 1 ? run + 1 : 1; best = Math.max(best, run); prev = d; }
+  const today = dayNum(new Date());
+  let cur = 0, d = days.has(today) ? today : days.has(today - 1) ? today - 1 : null;   // still alive if she landed yesterday
+  while (d != null && days.has(d)) { cur++; d--; }
+  return { cur, best };
+}
+function statTotals(recs) {
+  const landed = recs.filter(r => r.to), days = dayTotals(recs);
+  return {
+    flights: recs.length,
+    mins: recs.reduce((s, r) => s + r.mins, 0),
+    km: recs.reduce((s, r) => s + r.km, 0),
+    countries: new Set(landed.map(r => r.to.c)).size,
+    continents: new Set(landed.map(r => r.to.ct.id)).size,
+    best: streaks(recs).best,
+    longest: recs.reduce((m, r) => Math.max(m, r.flightMins), 0),
+    bigDay: Math.max(0, ...days.values()),
+    early: recs.some(r => r.st && r.st.getHours() < 8) ? 1 : 0,
+    owl: recs.some(r => r.en && (r.en.getHours() >= 23 || r.en.getHours() < 4)) ? 1 : 0,
+  };
+}
+
+// ── Badges ──
+// kind decides how progress reads: n (a count), h (hours), km (distance), yes (one-off)
+const BADGES = [
+  { id: 'first', icon: '🛫', name: 'first flight', desc: 'land your very first flight', kind: 'n', of: 'flights', goal: 1 },
+  { id: 'f10', icon: '✈️', name: 'frequent flyer', desc: 'land 10 flights', kind: 'n', of: 'flights', goal: 10 },
+  { id: 'f25', icon: '🎫', name: 'gold card', desc: 'land 25 flights', kind: 'n', of: 'flights', goal: 25 },
+  { id: 'f50', icon: '💎', name: 'platinum', desc: 'land 50 flights', kind: 'n', of: 'flights', goal: 50 },
+  { id: 'f100', icon: '👑', name: 'centurion', desc: 'land 100 flights', kind: 'n', of: 'flights', goal: 100 },
+
+  { id: 'h10', icon: '📖', name: 'ten hours', desc: 'study for 10 hours in total', kind: 'h', of: 'mins', goal: 10 },
+  { id: 'h25', icon: '📚', name: 'bookworm', desc: 'study for 25 hours in total', kind: 'h', of: 'mins', goal: 25 },
+  { id: 'h50', icon: '🧠', name: 'big brain', desc: 'study for 50 hours in total', kind: 'h', of: 'mins', goal: 50 },
+  { id: 'h100', icon: '🎓', name: 'hundred hours', desc: 'study for 100 hours in total', kind: 'h', of: 'mins', goal: 100 },
+  { id: 'h250', icon: '🏛️', name: 'scholar', desc: 'study for 250 hours in total', kind: 'h', of: 'mins', goal: 250 },
+  { id: 'h500', icon: '🌟', name: 'five hundred', desc: 'study for 500 hours in total', kind: 'h', of: 'mins', goal: 500 },
+
+  { id: 'amazon', icon: '🌿', name: 'the amazon', desc: 'fly as far as the amazon river is long', kind: 'km', of: 'km', goal: 6400 },
+  { id: 'through', icon: '🌎', name: 'straight through', desc: 'fly the width of the earth, pole to pole through the middle', kind: 'km', of: 'km', goal: 12742 },
+  { id: 'wall', icon: '🧱', name: 'the great wall', desc: 'fly the full length of the great wall of china', kind: 'km', of: 'km', goal: 21196 },
+  { id: 'mars', icon: '🔴', name: 'around mars', desc: 'fly once around the red planet', kind: 'km', of: 'km', goal: 21344 },
+  { id: 'kangaroo', icon: '🦘', name: 'the kangaroo route', desc: 'fly london to sydney and back again', kind: 'km', of: 'km', goal: 33980 },
+  { id: 'geo', icon: '🛰️', name: 'satellite height', desc: 'fly as high as the tv satellites orbit', kind: 'km', of: 'km', goal: 35786 },
+  { id: 'world', icon: '🌍', name: 'around the world', desc: 'fly the whole way round the equator', kind: 'km', of: 'km', goal: KM_WORLD },
+  { id: 'k50', icon: '🧭', name: 'fifty thousand', desc: 'fly 50,000 km', kind: 'km', of: 'km', goal: 50000 },
+  { id: 'twice', icon: '🌏', name: 'twice around', desc: 'fly around the world two times', kind: 'km', of: 'km', goal: KM_WORLD * 2 },
+  { id: 'k100', icon: '🚀', name: 'six figures', desc: 'fly 100,000 km', kind: 'km', of: 'km', goal: 100000 },
+  { id: 'moon', icon: '🌕', name: 'to the moon', desc: 'fly as far as the moon', kind: 'km', of: 'km', goal: 384400 },
+
+  { id: 'c5', icon: '🗺️', name: 'explorer', desc: 'land in 5 countries', kind: 'n', of: 'countries', goal: 5 },
+  { id: 'c10', icon: '🧳', name: 'globetrotter', desc: 'land in 10 countries', kind: 'n', of: 'countries', goal: 10 },
+  { id: 'c15', icon: '🛂', name: 'full passport', desc: 'land in 15 countries', kind: 'n', of: 'countries', goal: 15 },
+  { id: 'c25', icon: '🌐', name: 'citizen of the world', desc: 'land in 25 countries', kind: 'n', of: 'countries', goal: 25 },
+  { id: 'cont', icon: '🏆', name: 'every continent', desc: 'land on all six continents', kind: 'n', of: 'continents', goal: 6 },
+
+  { id: 's3', icon: '🔥', name: 'on a roll', desc: 'land a flight 3 days in a row', kind: 'n', of: 'best', goal: 3 },
+  { id: 's7', icon: '⚡', name: 'full week', desc: 'land a flight 7 days in a row', kind: 'n', of: 'best', goal: 7 },
+  { id: 's14', icon: '💪', name: 'fortnight', desc: 'land a flight 14 days in a row', kind: 'n', of: 'best', goal: 14 },
+  { id: 's30', icon: '🏅', name: 'unstoppable', desc: 'land a flight 30 days in a row', kind: 'n', of: 'best', goal: 30 },
+
+  { id: 'long', icon: '🛬', name: 'long haul', desc: 'land a single flight of 8 hours or more', kind: 'h', of: 'longest', goal: 8 },
+  { id: 'bigday', icon: '☀️', name: 'marathon day', desc: 'study 6 hours in one day', kind: 'h', of: 'bigDay', goal: 6 },
+  { id: 'early', icon: '🌅', name: 'early bird', desc: 'take off before 8 am', kind: 'yes', of: 'early', goal: 1 },
+  { id: 'owl', icon: '🦉', name: 'night owl', desc: 'still studying past 11 pm', kind: 'yes', of: 'owl', goal: 1 },
+];
+function badgeVal(b, t) { const v = t[b.of]; return b.kind === 'h' ? v / 60 : v; }
+function earnedIds(flights) {
+  const t = statTotals(flights.map(statRec).filter(Boolean));
+  return new Set(BADGES.filter(b => badgeVal(b, t) >= b.goal).map(b => b.id));
+}
+function badgeProgress(b, v) {
+  if (b.kind === 'yes') return 'not yet';
+  if (b.kind === 'km') return `${fmtDist(v)} of ${fmtDist(b.goal)}`;
+  if (b.kind === 'h') return `${Math.floor(v)} of ${b.goal} h`;
+  return `${fmtNum(v)} of ${fmtNum(b.goal)}`;
+}
+
+// ── Rendering ──
+let statsRange = 'all', statsRecs = [];
+const statsBody = $('stats-body');
+async function renderStats() {
+  let h;
+  try {
+    const DB = await dbReady;
+    h = await DB.loadFlights();
+  } catch(e) {
+    console.error(e);
+    statsBody.replaceChildren(el('p', 'hist-empty', 'couldn’t load your flights. check your connection and open this tab again.'));
+    return;
+  }
+  statsRecs = h.map(statRec).filter(Boolean);
+  drawStats();
+}
+document.querySelectorAll('[data-srange]').forEach(b => b.addEventListener('click', () => {
+  statsRange = b.dataset.srange;
+  document.querySelectorAll('[data-srange]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  drawStats();
+}));
+
+const section = (title, ...kids) => { const s = el('section', 'stat-sec'); s.append(el('h3', 'stat-h', title), ...kids); return s; };
+function drawStats() {
+  const all = statsRecs;
+  if (!all.length) { statsBody.replaceChildren(el('p', 'hist-empty', 'no flights yet. land your first one and your stats start here.')); return; }
+  const today = dayNum(new Date());
+  const recs = statsRange === 'all' ? all : all.filter(r => r.day > today - Number(statsRange));
+  const t = statTotals(recs);
+  const word = statsRange === '7' ? 'this week' : statsRange === '30' ? 'in the last month' : '';
+  const out = [];
+
+  // headline numbers
+  const grid = el('div', 'stat-grid');
+  const tile = (value, label) => { const d = el('div', 'stat-tile'); d.append(el('strong', null, value), el('span', null, label)); grid.append(d); };
+  tile(minWords(t.mins), 'studied');
+  tile(fmtNum(t.flights), t.flights === 1 ? 'flight' : 'flights');
+  tile(fmtDist(t.km), 'flown');
+  tile(fmtNum(t.countries), t.countries === 1 ? 'country' : 'countries');
+  out.push(grid);
+  if (!recs.length) out.push(el('p', 'stat-note', `no flights ${word} yet.`));
+
+  // time per module (tap one to see it on the map)
+  if (recs.length) {
+    const by = new Map();
+    for (const r of recs) { const k = r.module || UNCAT; by.set(k, (by.get(k) || 0) + r.mins); }
+    const rows = [...by.entries()].sort((a, b) => (a[0] === UNCAT) - (b[0] === UNCAT) || b[1] - a[1]);   // uncategorised last
+    const max = Math.max(1, ...rows.map(r => r[1])), total = Math.max(1, t.mins);
+    const list = el('div', 'mod-bars');
+    for (const [k, mins] of rows) {
+      const name = k === UNCAT ? 'uncategorised' : k;
+      const row = el('button', 'mod-bar' + (k === UNCAT ? ' uncat' : ''));
+      const top = el('div', 'mod-bar-top');
+      top.append(el('span', 'mod-name', name), el('span', 'mod-time', `${minWords(mins)} · ${Math.round(mins / total * 100)}%`));
+      const track = el('div', 'mod-track'), fill = el('div', 'mod-fill');
+      fill.style.width = (mins / max * 100).toFixed(1) + '%'; track.append(fill);
+      row.append(top, track);
+      row.type = 'button'; row.title = 'show on the map';
+      row.addEventListener('click', () => { mapState.module = k; mapState.cont = 'all'; showView('map'); });
+      list.append(row);
+    }
+    out.push(section('time per module', list));
+  }
+
+  // records
+  const landed = recs.filter(r => r.to);
+  if (landed.length) {
+    const recList = el('div', 'records');
+    const record = (label, main, sub) => { const d = el('div', 'record'); d.append(el('span', 'record-label', label), el('strong', null, main), el('span', 'record-sub', sub)); recList.append(d); };
+    const far = landed.reduce((a, b) => (b.km > a.km ? b : a));
+    record('longest flight', `${far.from.n} → ${far.to.n}`, `${fmtDist(far.km)} · ${minWords(far.flightMins)} · ${shortDate(dayDate(far.day))}`);
+    const days = [...dayTotals(recs).entries()].sort((a, b) => b[1] - a[1]);
+    if (days.length && days[0][1] > 0) record('longest study day', shortDate(dayDate(days[0][0])), minWords(days[0][1]));
+    const count = (keyOf) => { const m = new Map(); landed.forEach(r => m.set(keyOf(r), (m.get(keyOf(r)) || 0) + 1)); return [...m.entries()].sort((a, b) => b[1] - a[1])[0]; };
+    const route = count(r => `${r.from.n} → ${r.to.n}`);
+    record('most flown route', route[0], route[1] > 1 ? `${route[1]} times` : 'no repeats yet');
+    const fav = count(r => r.to.n);
+    record('favourite destination', fav[0], `landed ${fav[1]} time${fav[1] === 1 ? '' : 's'}`);
+    out.push(section('records', recList));
+
+    // places: the six continents, lit once she's landed on them
+    const seen = new Set(landed.map(r => r.to.ct.id));
+    const conts = el('div', 'chips');
+    for (const k of CONTINENTS) {
+      const c = el('span', 'chip static' + (seen.has(k.id) ? ' lit' : ''));
+      const dot = el('span', 'chip-dot'); dot.style.background = k.color; c.append(dot, document.createTextNode(k.label));
+      conts.append(c);
+    }
+    const cities = new Set(landed.map(r => r.to.n)).size;
+    out.push(section('places', el('p', 'stat-line', `${t.countries} countr${t.countries === 1 ? 'y' : 'ies'} and ${cities} cit${cities === 1 ? 'y' : 'ies'} on ${seen.size} of 6 continents`), conts));
+  }
+
+  // streaks and the study calendar (all time)
+  const st = streaks(all);
+  const line = el('p', 'stat-line', st.cur ? `${st.cur} day${st.cur === 1 ? '' : 's'} in a row right now 🔥 · best ${st.best}` : `best streak: ${st.best} day${st.best === 1 ? '' : 's'}. land one today to start a new one.`);
+  out.push(section('streak', line, studyCalendar(all)));
+
+  // badges (all time): earned first, then the closest to earning
+  const tAll = statTotals(all);
+  const scored = BADGES.map(b => { const v = badgeVal(b, tAll); return { b, v, p: Math.min(1, v / b.goal), done: v >= b.goal }; });
+  const done = scored.filter(x => x.done), todo = scored.filter(x => !x.done).sort((a, b) => b.p - a.p);
+  const bgrid = el('div', 'badges');
+  [...done, ...todo].forEach((x, i) => {
+    const card = el('div', 'badge' + (x.done ? ' earned' : '') + (!x.done && i === done.length ? ' next' : ''));
+    card.dataset.badge = x.b.id;
+    card.append(el('span', 'badge-icon', x.b.icon), el('strong', 'badge-name', x.b.name), el('span', 'badge-desc', x.b.desc));
+    if (!x.done) {
+      if (x.b.kind !== 'yes') { const tr = el('div', 'badge-track'), f = el('div', 'badge-fill'); f.style.width = (x.p * 100).toFixed(1) + '%'; tr.append(f); card.append(tr); }
+      card.append(el('span', 'badge-prog', (i === done.length ? 'next up · ' : '') + badgeProgress(x.b, x.v)));
+    }
+    bgrid.append(card);
+  });
+  out.push(section(`badges · ${done.length} of ${BADGES.length}`, bgrid));
+  out.push(el('p', 'stat-note', 'streaks and badges count every flight you’ve landed.'));
+  statsBody.replaceChildren(...out);
+  if (statsFocus) focusBadge(statsFocus);
+}
+// from the landed card: open the stats tab at that badge and make it glow
+let statsFocus = null;
+function openBadge(id) { statsFocus = id; showView('stats'); }
+function focusBadge(id) {
+  statsFocus = null;
+  const card = statsBody.querySelector(`.badge[data-badge="${id}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: 'center', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+}
+
+// the last 12 weeks, one square a day (monday at the top), shaded by time studied
+function studyCalendar(recs) {
+  const mins = dayTotals(recs), today = dayNum(new Date());
+  const dow = (dayDate(today).getDay() + 6) % 7;            // 0 = monday
+  const start = today - dow - 7 * 11;
+  const cal = el('div', 'cal'); cal.setAttribute('role', 'img');
+  let studied = 0;
+  for (let d = start; d < start + 84; d++) {
+    const m = mins.get(d) || 0;
+    const lvl = d > today ? 'future' : !m && !mins.has(d) ? '0' : m < 30 ? '1' : m < 90 ? '2' : m < 180 ? '3' : '4';
+    const c = el('span', 'cal-day l' + lvl);
+    if (d <= today) c.title = `${shortDate(dayDate(d))}: ${mins.has(d) ? minWords(m) : 'no flights'}`;
+    if (mins.has(d)) studied++;
+    cal.append(c);
+  }
+  cal.setAttribute('aria-label', `study calendar: flights on ${studied} of the last 12 weeks' days`);
+  const wrap = el('div', 'cal-wrap'), legend = el('div', 'cal-legend');
+  legend.append(el('span', null, '12 weeks ago'), el('span', null, 'today'));
+  wrap.append(cal, legend);
+  return wrap;
 }
 
 // ── Start-up ──────────────────────────────────────────────

@@ -11,7 +11,7 @@ FAKE_DB = """
 const flights = [
   {id:'a3', seq:3, from:'london', to:'tokyo', km:9560, dur:'10h 37m', realDur:null, date:'12/11/2026'},
   {id:'a2', seq:2, from:'paris', to:'rome', km:1106, dur:'1h 14m', realDur:'4m 20s', date:'10/11/2026'},
-  {id:'a1', seq:1, from:'jaffna', to:'singapore', km:2580, dur:'2h 52m', realDur:null, date:'02/11/2026'},
+  {id:'a1', seq:1, from:'jaffna', to:'singapore', km:2580, dur:'2h 52m', realDur:null, date:'02/11/2026', flightMin:172, realMin:172},
 ];
 window.__saved = [];
 window.DB = {

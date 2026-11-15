@@ -94,8 +94,15 @@ The filename must stay `index.html` for Pages to serve it.
   via `addToMap`; 1.25 s per flight ÷ speed; any interaction or filter change stops it
   (`interacted()` and `applyMapFilters()` both end it). The yes/no box is `askConfirm()`,
   shared with the no-module warning.
-- Old flights: no `flightMin` = saved before phase 0 → pass says "before modules", and
-  phase 4 stats leave them out. Newer flights with no `module` count as uncategorised.
+- Stats tab (app.js "Stats tab"): `statRec` normalises a flight, `statTotals` sums,
+  `BADGES` is the badge list (`of` = which total, `kind` = how progress reads). Study time =
+  `realMin` (or the old duration strings). Week/month/all affects numbers, modules, records,
+  places; streaks, calendar and badges are all-time. `saveToHistory` compares
+  `earnedIds()` before/after to show new badges on the landed card (`#ld-badge`).
+- Every flight has `flightMin`/`realMin`: the 23 pre-module flights (june–july 2026) were
+  given modules (akt/osce alternating) and minutes from their `dur` on 2026-11-15 with the
+  admin key (backup: ~/code/drish-backups/). There is no "before modules" case any more;
+  a flight with no `module` is uncategorised.
 - Modules: her list is `MODULE_GROUPS` in app.js (year 4/5 modules a–c, year 6, cpp, exam prep);
   ones she adds go to `modules/{name}` ("your modules"). The plan card's module row opens
   a picker below the sidebar (above the panel on iPhone). Flying with none shows a
