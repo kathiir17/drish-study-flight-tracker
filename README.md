@@ -5,13 +5,16 @@ pick two cities, press fly, and study for as long as the flight takes.
 
 **live:** https://kathiir17.github.io/drish-study-flight-tracker
 
-> a revamp is under way (see `REVAMP.md`). phase 1, the new interface, is done.
+> the revamp in `REVAMP.md` is done up to phase 4: new interface, smooth globe,
+> pause and realistic flights, modules, boarding passes, the flight map with replay, and
+> stats with badges. what's parked for later is listed there.
 
 ## how it works
 
 - **the screen:** a 3d globe under a night sky, with a floating sidebar (like apple
-  maps) holding the tabs: **fly**, **passes** (her flight history), **map** and **stats**. the globe always stays in view beside it. on a phone the panel
-  docks at the bottom instead.
+  maps) holding the tabs: **fly**, **passes** (her flight history), **map** and **stats**.
+  the globe always stays in view beside it. on a phone the panel docks at the bottom
+  instead.
 - **choosing a route:** tap a city on the globe for the departure, tap another for the
   destination, or type them (autocomplete, with arrow keys and enter). the card shows
   the distance and how long the flight will be before she takes off. 70 cities.
@@ -37,7 +40,9 @@ pick two cities, press fly, and study for as long as the flight takes.
   as uncategorised in stats.
 - **pomodoro:** switch it on and choose focus and break minutes (default 50 / 10,
   remembered on each device). real wall-clock time; the flight keeps going during breaks.
-- **landing:** a summary card, with "fly onward" to start the next leg from there.
+- **landing:** a summary card, with "fly onward" to start the next leg from there. if
+  the flight earned any badges they're listed on the card, and tapping one opens it in
+  the stats tab.
 - **chimes:** takeoff, halfway, landing, break and back-to-focus. sound starts working
   after the first tap or key press (a browser rule).
 - **boarding passes:** at takeoff a pass prints itself below the sidebar (airport codes,
@@ -48,25 +53,39 @@ pick two cities, press fly, and study for as long as the flight takes.
   flown (km or miles toggle). tapping a pass shows its route on the globe. deleting one
   needs two taps.
 - **map tab:** every landed flight drawn on the globe, coloured by the continent it
-  landed in. a route flown more than once is one arc that gets thicker and brighter;
-  cities she's landed in get a dot that grows with each landing (a place she's only
-  flown from is a small ring, since "been to" means landed in). filters: destination
-  continent, module, and a date range slider (week / month / all, or tap the dates for
-  exact from/to pickers), which covers every flight ever saved. a summary line counts flights, distance and countries. tapping a
-  route or a city shows how many flights, time studied and when it was last flown.
-- **stats tab:** week / month / all time. headline numbers (time studied, flights,
-  distance, countries), time per module (tap a bar to see it on the map), records
-  (longest flight, longest study day, most flown route, favourite destination), places
-  (continents lit once landed on), the current and best streak with a 12-week study
-  calendar, and 35 badges (flights, hours, distances like the kangaroo route and around
-  the world, countries, streaks, one-offs). earned badges are lit, the rest show
-  progress, closest first. a landing that earns a badge says so on the landed card.
-  study time is real time (pauses left out). badges on the landed card can be tapped to
-  open them in the stats tab.
-- **replay:** a button on the map tab plays the filtered flights oldest first: a plane
-  whizzes from a to b in 1.25 s (1x, 2x or 5x), leaving its arc, while the globe follows,
-  a caption names each flight and the summary counts up. over 60 s it asks first and
-  suggests a faster speed or tighter filters. touching the globe or a filter stops it.
+  landed in (europe blue, asia amber, africa rose, north america violet, south america
+  green, oceania cyan). a route flown more than once is one arc that gets thicker and
+  brighter; cities she's landed in get a dot that grows with each landing (a place she's
+  only flown from is a small ring, since "been to" means landed in).
+  - **filters:** destination continent (chips, which double as the colour key), module,
+    and a date range: a two-handle slider, week / month / all, or tap the dates above it
+    for exact from/to pickers.
+  - **summary line:** flights, distance and countries for whatever's shown.
+  - **tap a route or a city** for a card: how many flights or landings, time studied,
+    and when it was last flown.
+  - **replay:** plays the filtered flights oldest first. a plane whizzes from a to b in
+    1.25 s (1x, 2x or 5x), leaving its arc, while the globe follows, a caption names
+    each flight and the summary counts up. if it would take over 60 s it asks first and
+    suggests a faster speed, tighter filters or a shorter date range. touching the
+    globe, changing a filter or leaving the tab stops it.
+- **stats tab:** week / month / all time.
+  - **headline numbers:** time studied, flights, distance and countries landed in.
+    study time is the real time she spent (pauses left out), not the sped-up flight time.
+  - **time per module:** a bar per module, biggest first, uncategorised last. tapping
+    one opens the map filtered to that module.
+  - **records:** longest flight, longest study day, most flown route, favourite
+    destination.
+  - **places:** the six continents, lit once she's landed on each, plus countries and
+    cities.
+  - **streak:** current and best run of days with a landing, and a 12-week calendar
+    shaded by how much she studied each day.
+  - **badges (35):** flights (1–100), hours (10–500), distance (from the length of the
+    amazon, through the kangaroo route and around the world, to the moon), countries
+    and continents, streaks (3–30 days), and one-offs (long haul, marathon day, early
+    bird, night owl). earned ones glow; the rest show progress, closest first, with the
+    nearest marked "next up".
+  - week / month change the numbers, modules, records and places; the streak, calendar
+    and badges always count everything.
 - **speed:** 1x–10000x, chosen before takeoff or changed mid-flight without the
   progress jumping. sped-up flights record the real time spent too.
 - **as an app:** in safari, share → add to home screen (iphone/ipad) or file → add to
@@ -91,7 +110,7 @@ pick two cities, press fly, and study for as long as the flight takes.
 |---|---|
 | `index.html` | page structure. no build step, no framework. |
 | `styles.css` | all styling; colours, type and spacing are tokens at the top. |
-| `app.js` | the app: globe drawing, touch, timing, pomodoro, audio, interface. |
+| `app.js` | the app, in labelled sections: cities and continents, globe drawing, camera and touch, flight timing, pomodoro, audio, interface, modules, boarding passes, flight map (and replay), stats and badges. |
 | `db.js` | the only file that talks to the database. exposes `window.DB` (`loadFlights`, `addFlight`, `deleteFlight`, `loadModules`, `addModule`) and fires `db-ready`. |
 | `firestore.rules` | database security rules (see below). |
 | `manifest.webmanifest`, `icons/` | home-screen / dock app name and icon (`icon.svg` is the source). |
@@ -112,11 +131,27 @@ firebase firestore, project `drish-flight-study-tracker`, no sign-in. one docume
 flight:
 
 ```
-flights/{id} = { seq, from, to, km, dur, realDur, date: "DD/MM/YYYY" }
+flights/{id} = { seq, from, to, km, dur, realDur, date: "DD/MM/YYYY",
+                 module, flightMin, realMin, startedAt, endedAt }
+modules/{name} = { name }
 ```
 
-`seq` goes up with each flight (oldest = 1). `realDur` is `null` unless the flight was
-sped up. saves only ever add or delete a single flight, never rewrite the list.
+- `seq` goes up with each flight (oldest = 1). `realDur` is `null` unless the flight was
+  sped up.
+- `flightMin` is the flight's length, `realMin` the real time she studied (pauses left
+  out). stats are built from these. `startedAt` / `endedAt` are the real takeoff and
+  landing times.
+- `module` is left out when she flies without one (shown as uncategorised).
+- `modules/` holds the modules she added herself; her main list is built into `app.js`.
+- saves only ever add or delete a single flight, never rewrite the list. the flight's
+  own id is the document id, so the same flight saved twice (two tabs) is refused, not
+  doubled.
+
+**data change on 15 nov 2026:** her first 23 flights (june–july 2026, from before
+modules existed) were given modules (akt and osce, alternating from the oldest) and
+`flightMin` / `realMin` from their saved durations. only those fields were added, using
+the admin key; nothing else changed. a backup of the flights from just before is in
+`~/code/drish-backups/` (outside the repo).
 
 **security rules** (`firestore.rules`): anyone can read, add a correctly-shaped flight,
 or delete one; nothing can be edited. the rules list the exact fields and limits, so
@@ -153,5 +188,7 @@ named `index.html`.
   play then. the timer still keeps correct time and catches up (including saving a
   landed flight) as soon as the page is opened again.
 - **iphone silent switch** mutes the chimes.
+- **badges and stats only count what's in the database:** a flight deleted from the
+  passes tab disappears from the map and stats too.
 - **anyone with the link can delete flights.** there's no sign-in, so the rules can't
   tell drish apart from anyone else. fixing this needs some form of sign-in.
