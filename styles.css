@@ -568,3 +568,21 @@ body.paused .phase::before, body.paused .live-dot { background: var(--ink-3); bo
 .map-stats dt { font-size: var(--t-xs); color: var(--ink-3); }
 .map-stats dd { font: 600 var(--t-sm) var(--font-round); font-variant-numeric: tabular-nums; }
 .map-hint { font-size: var(--t-xs); color: var(--ink-3); margin: 2px 2px 0; }
+
+/* replay */
+.replay-row { display: flex; gap: 8px; align-items: stretch; margin: 2px 0 12px; }
+.replay-btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 36px; padding: 0 14px; border-radius: 10px; border: 0; cursor: pointer;
+  background: var(--amber); color: var(--amber-ink); font: 600 var(--t-sm) var(--font-round);
+}
+.replay-btn:hover:not(:disabled) { filter: brightness(1.06); }
+.replay-btn:disabled { opacity: .4; cursor: default; }
+.replay-icon { width: 0; height: 0; border-style: solid; border-width: 5.5px 0 5.5px 9px; border-color: transparent transparent transparent currentColor; }
+.replay-btn.playing { background: rgba(255, 255, 255, .14); color: var(--ink); }
+.replay-btn.playing .replay-icon { width: 10px; height: 10px; border: 0; border-radius: 2px; background: currentColor; }
+.segmented.replay-speed { flex: none; width: 120px; }
+.segmented.replay-speed button:last-child { flex: 1; }
+body:not(.on-fly) .pill.replay-cap { opacity: 1; }
+.replay-cap { z-index: 3; }
+body.replaying .map-hint { visibility: hidden; }

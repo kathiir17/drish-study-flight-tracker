@@ -136,8 +136,9 @@ split into 4a (map) and 4b (stats), pushed separately.
   (incl. uncategorised; pre-module flights only under "all"), date range slider with
   week/month/all and exact from/to pickers (tap the dates) (every flight has `date`, so old ones count). summary line (flights ·
   distance · countries landed in). tap a route or city for a details card. agreed rule:
-  she has only "been" somewhere if she landed there. later ideas: replay timelapse (#4);
-  colour-by switch (#5, low priority); short/long-haul filter not wanted for now.
+  she has only "been" somewhere if she landed there. replay (built): plays the filtered flights oldest first, 1.25 s per whizz at 1x
+  (2x/5x), caption + counting-up summary; over 60 s it asks first with suggestions (no
+  length cap, no "new country" moments, by agreement). later ideas: colour-by switch (#5, low priority); short/long-haul filter not wanted for now.
 - **stats and achievements** (poker-app style awards): time per module, total distance,
   longest flight, streaks, countries/continents visited, milestone badges. completed
   flights only.

@@ -396,10 +396,13 @@ function drawRoute(from, to, prog, withPlane, paused, t) {
     ctx.strokeStyle = `rgba(168,183,207,${(0.55 * (1 - k)).toFixed(3)})`; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(p.sx, p.sy, 10 + k * 18, 0, Math.PI * 2); ctx.stroke();
   }
+  drawPlane(p.sx, p.sy, ang, paused ? null : 'rgba(255,189,90,0.9)', paused ? '#a8b7cf' : '#fff4dc');
+}
+function drawPlane(x, y, ang, glow, fill) {
   ctx.save();
-  ctx.translate(p.sx, p.sy); ctx.rotate(ang);
-  ctx.shadowColor = paused ? 'rgba(0,0,0,0)' : 'rgba(255,189,90,0.9)'; ctx.shadowBlur = paused ? 0 : 12;
-  ctx.fillStyle = paused ? '#a8b7cf' : '#fff4dc';
+  ctx.translate(x, y); ctx.rotate(ang);
+  ctx.shadowColor = glow || 'rgba(0,0,0,0)'; ctx.shadowBlur = glow ? 12 : 0;
+  ctx.fillStyle = fill;
   ctx.beginPath();   // a small plane, nose pointing along +x
   ctx.moveTo(11, 0); ctx.lineTo(7, -1.6); ctx.lineTo(1, -1.6); ctx.lineTo(-3, -9); ctx.lineTo(-6, -9);
   ctx.lineTo(-3, -1.6); ctx.lineTo(-8, -1.6); ctx.lineTo(-10, -4.5); ctx.lineTo(-12, -4.5); ctx.lineTo(-10.5, 0);
@@ -431,7 +434,8 @@ const cam = {
   samples: [],           // recent drag positions, for the flick speed on release
 };
 function setZoom(z) { zoom = clamp(z, ZOOM_MIN, ZOOM_MAX); R = baseR * zoom; }
-function interacted() { cam.auto = null; cam.lastInteract = performance.now(); setOffFrame(true); }
+function interacted() { if (replay) stopReplay();   // touching the globe stops a map replay
+  cam.auto = null; cam.lastInteract = performance.now(); setOffFrame(true); }
 
 // ── Recentre ──
 // Once she drags or zooms away from a route, a button (bottom left) glides back to its
@@ -524,7 +528,7 @@ function frameRoute(from, to, prog) {
 function updateCamera(dt) {   // dt in seconds
   const now = performance.now();
   if (cam.auto && !dragging && !pinch) {
-    const k = reduceMotion.matches ? 1 : 1 - Math.exp(-dt / 0.35);   // ease out, settles in ~2 s
+    const k = reduceMotion.matches ? 1 : 1 - Math.exp(-dt / (cam.auto.tau || 0.35));   // ease out, settles in ~2 s
     const dY = wrapAngle(cam.auto.rotY - rotY);
     rotY += dY * k; rotX += (cam.auto.rotX - rotX) * k;
     setZoom(zoom + (cam.auto.zoom - zoom) * k); cam.tZoom = zoom; cam.anchor = null;
@@ -1375,7 +1379,7 @@ document.addEventListener('pointerdown', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (!$('confirm').hidden) { e.preventDefault(); answerNoModule(false); }
+  if (!$('confirm').hidden) { e.preventDefault(); answerConfirm(false); }
   else if (!moduleMenu.hidden) { closeModuleMenu(); btnModule.focus(); }
 });
 window.addEventListener('resize', () => { if (!moduleMenu.hidden) placeModuleMenu(); });
@@ -1385,17 +1389,30 @@ if (window.ResizeObserver) new ResizeObserver(() => { if (!moduleMenu.hidden) pl
 // and picking a module then takes off straight away.
 function askNoModule() {
   closeModuleMenu();
+  askConfirm('no module selected', 'are you sure you want to fly without one? this flight will count as uncategorised in your stats.',
+             'no, pick a module', 'yes, fly anyway', yes => {
+    if (yes) submitPlan(true);
+    else { btnModule.classList.add('nudge'); openModuleMenu(true); }
+  });
+}
+// The yes/no box, shared by the no-module warning and the long-replay warning.
+// Tapping outside it or pressing escape counts as no.
+let confirmAnswer = null;
+function askConfirm(title, body, noText, yesText, answer) {
+  $('confirm-title').textContent = title; $('confirm-body').textContent = body;
+  $('confirm-no').textContent = noText; $('confirm-yes').textContent = yesText;
+  confirmAnswer = answer;
   $('confirm').hidden = false;
   $('confirm-yes').focus();
 }
-function answerNoModule(yes) {
+function answerConfirm(yes) {
   $('confirm').hidden = true;
-  if (yes) submitPlan(true);
-  else { btnModule.classList.add('nudge'); openModuleMenu(true); }
+  const a = confirmAnswer; confirmAnswer = null;
+  if (a) a(yes);
 }
-$('confirm-yes').addEventListener('click', () => answerNoModule(true));
-$('confirm-no').addEventListener('click', () => answerNoModule(false));
-$('confirm').addEventListener('pointerdown', e => { if (e.target === $('confirm')) answerNoModule(false); });
+$('confirm-yes').addEventListener('click', () => answerConfirm(true));
+$('confirm-no').addEventListener('click', () => answerConfirm(false));
+$('confirm').addEventListener('pointerdown', e => { if (e.target === $('confirm')) answerConfirm(false); });
 showModule();
 
 // pause / resume
@@ -1422,7 +1439,7 @@ function showView(name) {
   if (name === 'fly') { textCache.clear(); renderState(); tick(); }
   if (name === 'map' && prev !== 'map') { mapState.sel = null; renderMap(true); }
   if (prev === 'map' && name !== 'map') {   // back from the map: return to the flight (or plan) being shown
-    mapState.hover = null;
+    mapState.hover = null; stopReplay();
     const r = currentRoute();
     if (r) frameRoute(r.from, r.to, r.prog);
   }
@@ -1866,7 +1883,7 @@ async function renderMap(face) {
   for (const f of h) {
     const from = findCity(f.from), to = findCity(f.to), d = parseDDMMYYYY(f.date);
     if (!from || !to || from === to || !d) continue;    // only real routes can be drawn
-    mapState.all.push({ from, to, day: dayNum(d), mins: studiedMin(f), km: Number(f.km) || routeKm(from, to),
+    mapState.all.push({ seq: Number(f.seq) || 0, from, to, day: dayNum(d), mins: studiedMin(f), km: Number(f.km) || routeKm(from, to),
                         module: typeof f.module === 'string' ? f.module : null, pre: !Number.isFinite(f.flightMin) });
   }
   // the date range runs from her first flight to today; keep her choice if she'd set one
@@ -1902,32 +1919,37 @@ function mapMatches(f, withCont) {
   return !withCont || mapState.cont === 'all' || f.to.ct.id === mapState.cont;
 }
 
-function applyMapFilters() {
-  const shown = mapState.all.filter(f => mapMatches(f, true));
-  // one arc per route, one entry per city
-  const routes = new Map(), cities = new Map();
-  const city = c => cities.get(c.n) || cities.set(c.n, { c, landed: 0, departed: 0, mins: 0, last: null }).get(c.n);
-  for (const f of shown) {
-    const key = f.from.n + '>' + f.to.n;
-    let r = routes.get(key);
-    if (!r) {
-      const a = ll2xyz(f.from.lat, f.from.lng), b = ll2xyz(f.to.lat, f.to.lng);
-      r = { key, from: f.from, to: f.to, n: 0, mins: 0, last: 0, pts: Array.from({ length: 49 }, (_, i) => slerp(a, b, i / 48)) };
-      routes.set(key, r);
-    }
-    r.n++; r.mins += f.mins; r.last = Math.max(r.last, f.day);
-    const t = city(f.to); t.landed++; t.mins += f.mins; t.last = Math.max(t.last || 0, f.day);
-    city(f.from).departed++;
+function summaryText(list) {
+  const km = list.reduce((s, f) => s + f.km, 0), countries = new Set(list.map(f => f.to.c)).size;
+  return `${list.length} flight${list.length === 1 ? '' : 's'} · ${fmtDist(km)} · ${countries} countr${countries === 1 ? 'y' : 'ies'}`;
+}
+// one arc per route, one entry per city: added to one flight at a time (the replay does it as each lands)
+function addToMap(routes, cities, f) {
+  const key = f.from.n + '>' + f.to.n;
+  let r = routes.get(key);
+  if (!r) {
+    const a = ll2xyz(f.from.lat, f.from.lng), b = ll2xyz(f.to.lat, f.to.lng);
+    r = { key, from: f.from, to: f.to, n: 0, mins: 0, last: 0, pts: Array.from({ length: 49 }, (_, i) => slerp(a, b, i / 48)) };
+    routes.set(key, r);
   }
+  r.n++; r.mins += f.mins; r.last = Math.max(r.last, f.day);
+  const city = c => cities.get(c.n) || cities.set(c.n, { c, landed: 0, departed: 0, mins: 0, last: null }).get(c.n);
+  const t = city(f.to); t.landed++; t.mins += f.mins; t.last = Math.max(t.last || 0, f.day);
+  city(f.from).departed++;
+}
+
+function applyMapFilters() {
+  endReplay();
+  const shown = mapState.all.filter(f => mapMatches(f, true));
+  const routes = new Map(), cities = new Map();
+  for (const f of shown) addToMap(routes, cities, f);
   mapState.routes = [...routes.values()].sort((a, b) => a.n - b.n);   // busiest drawn last, on top
   mapState.cities = cities;
 
-  // summary line
-  const km = shown.reduce((s, f) => s + f.km, 0);
-  const countries = new Set(shown.map(f => f.to.c)).size;
+  mapState.shown = shown;
   mapEls.summary.textContent = !mapState.all.length ? 'no flights yet. every flight you land will be drawn here.'
-    : !shown.length ? 'no flights match these filters.'
-    : `${shown.length} flight${shown.length === 1 ? '' : 's'} · ${fmtDist(km)} · ${countries} countr${countries === 1 ? 'y' : 'ies'}`;
+    : !shown.length ? 'no flights match these filters.' : summaryText(shown);
+  btnReplay.disabled = !shown.length;
 
   renderContinentChips();
   renderDateRange();
@@ -2004,6 +2026,7 @@ function faceMap() {
 
 // ── Drawing ──
 function mapSelected() {
+  if (replay) return null;
   const s = mapState.sel;
   if (!s) return null;
   if (s.kind === 'route') { const r = mapState.routes.find(x => x.key === s.key); return r ? { kind: 'route', r } : null; }
@@ -2014,9 +2037,10 @@ function routeLit(r, s) { return !s || (s.kind === 'route' ? s.r === r : r.from 
 function cityDotR(e) { return e.landed ? Math.min(11, 2.6 + 1.7 * Math.sqrt(e.landed)) : 2.6; }
 
 function drawMap() {
-  const s = mapSelected(), hv = mapState.hover;
+  const s = mapSelected(), hv = replay ? null : mapState.hover;
+  const routes = replay ? replay.routes : mapState.routes, cities = replay ? replay.cities : mapState.cities;
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  for (const r of mapState.routes) {
+  for (const r of routes.values()) {
     const lit = routeLit(r, s), k = Math.log2(r.n), col = r.to.ct.color;
     const isHover = hv && hv.kind === 'route' && hv.r === r;
     const w = 1.4 + 0.9 * k + (isHover ? 0.8 : 0);
@@ -2026,7 +2050,7 @@ function drawMap() {
     ctx.strokeStyle = hexA(col, a); ctx.lineWidth = w; ctx.stroke();
   }
   const labelAll = zoom >= 1.7;
-  for (const e of mapState.cities.values()) {
+  for (const e of cities.values()) {
     const p = projectLL(e.c.lat, e.c.lng);
     if (!p.vis) continue;
     const related = !s || (s.kind === 'city' ? s.e === e : s.r.from === e.c || s.r.to === e.c);
@@ -2042,6 +2066,7 @@ function drawMap() {
     }
     if (related && (labelAll || isHover || s)) drawLabel(e.c.n, p.sx + r + 5, p.sy + 4, `rgba(235,242,255,${(0.92 * dim).toFixed(3)})`);
   }
+  if (replay) drawReplayFlight();
 }
 
 // ── Tapping ──
@@ -2079,6 +2104,111 @@ function mapTap(x, y, touch) {
   mapState.sel = h && !same ? { kind: h.kind, key } : null;
   showMapDetail();
 }
+
+// ── Replay ──
+// Plays the flights matching the filters, oldest first: a plane whizzes from A to B in
+// 1.25 s (at 1x), its arc stays behind, then the next. The globe glides along, the
+// summary counts up and a caption names each flight. Anything she does (touching the
+// globe, changing a filter, leaving the tab) stops it and the full map comes back.
+const REPLAY_WHIZZ_MS = 1250, REPLAY_WARN_S = 60;
+const btnReplay = $('btn-replay'), replayCap = $('replay-cap');
+const rspeedBtns = [...document.querySelectorAll('[data-rspeed]')];
+let replay = null;     // { list, i, t0, routes, cities }
+let replaySpeed = 1;
+
+function replaySecs(n, speed) { return n * REPLAY_WHIZZ_MS / 1000 / speed; }
+function secsWords(s) { s = Math.round(s); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`; }
+
+function askReplay() {
+  const list = mapState.shown || [];
+  if (!list.length) return;
+  const secs = replaySecs(list.length, replaySpeed);
+  if (secs <= REPLAY_WARN_S) { startReplay(); return; }
+  // too long: say how long, and what would make it shorter
+  const faster = [2, 5].filter(v => v > replaySpeed).map(v => `${v}x takes ${secsWords(replaySecs(list.length, v))}`);
+  const tips = [faster.length ? `a faster speed (${faster.join(', ')})` : null,
+                mapState.cont === 'all' ? 'one continent' : null,
+                mapState.module === 'all' ? 'one module' : null,
+                'a shorter date range'].filter(Boolean);
+  const last = tips.pop();
+  askConfirm('this replay is a long one',
+    `${list.length} flights will take ${secsWords(secs)} at ${replaySpeed}x. to shorten it, try ${tips.length ? tips.join(', ') + ' or ' : ''}${last}.`,
+    'change it', 'replay anyway', yes => { if (yes) startReplay(); });
+}
+
+function startReplay() {
+  const list = [...mapState.shown].sort((a, b) => a.day - b.day || a.seq - b.seq);
+  mapState.sel = null; showMapDetail();
+  replay = { list, i: 0, t0: performance.now(), routes: new Map(), cities: new Map() };
+  btnReplay.classList.add('playing'); $('replay-label').textContent = 'stop';
+  document.body.classList.add('replaying');
+  replayCap.hidden = false;
+  mapEls.summary.textContent = summaryText([]);
+  replayFace();
+  replayCaption();
+}
+function endReplay() {   // tidy up without redrawing (the caller rebuilds the map)
+  if (!replay) return;
+  replay = null;
+  btnReplay.classList.remove('playing'); $('replay-label').textContent = 'replay';
+  document.body.classList.remove('replaying');
+  replayCap.hidden = true; replayCap.textContent = '';
+}
+function stopReplay() { if (replay) applyMapFilters(); }
+
+function replayDur() { return REPLAY_WHIZZ_MS / replaySpeed; }
+function replayFace() {   // turn towards the next route; quicker at higher speeds
+  const f = replay.list[replay.i];
+  const a = ll2xyz(f.from.lat, f.from.lng), b = ll2xyz(f.to.lat, f.to.lng);
+  const th = Math.acos(clamp(a[0]*b[0] + a[1]*b[1] + a[2]*b[2], -1, 1));
+  const v = viewCentredOn(slerp(a, b, 0.5), clamp(0.72 / Math.sin(th / 2 + 1e-6), 1, 1.6));
+  v.tau = 0.35 / Math.sqrt(replaySpeed);
+  cam.auto = v;
+}
+function replayCaption() {
+  const f = replay.list[replay.i];
+  replayCap.textContent = `${shortDate(dayDate(f.day))} · ${f.from.n} → ${f.to.n}${f.module ? ' · ' + f.module : ''} · ${replay.i + 1} of ${replay.list.length}`;
+}
+const easeInOut = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+// called every frame from drawMap while it plays
+function drawReplayFlight() {
+  const now = performance.now();
+  let k = (now - replay.t0) / replayDur();
+  while (replay && k >= 1) {   // landed: keep its arc, move on (more than one if a frame ran late)
+    const f = replay.list[replay.i];
+    addToMap(replay.routes, replay.cities, f);
+    mapEls.summary.textContent = summaryText(replay.list.slice(0, replay.i + 1));
+    replay.i++;
+    if (replay.i >= replay.list.length) { stopReplay(); return; }
+    replay.t0 += replayDur(); k = (now - replay.t0) / replayDur();
+    replayFace(); replayCaption();
+  }
+  const f = replay.list[replay.i];
+  const a = ll2xyz(f.from.lat, f.from.lng), b = ll2xyz(f.to.lat, f.to.lng);
+  const e = easeInOut(clamp(k, 0, 1)), col = f.to.ct.color;
+  const steps = 48, pts = [];
+  for (let i = 0; i <= steps * e; i++) pts.push(slerp(a, b, i / steps));
+  pts.push(slerp(a, b, e));
+  ctx.lineCap = 'round';
+  strokePath(pts); ctx.strokeStyle = hexA(col, 0.25); ctx.lineWidth = 7; ctx.stroke();
+  strokePath(pts); ctx.strokeStyle = hexA(col, 0.95); ctx.lineWidth = 2.2; ctx.stroke();
+  const p = project(...slerp(a, b, e));
+  if (!p.vis) return;
+  const q = project(...slerp(a, b, Math.min(1, e + 0.004))), back = project(...slerp(a, b, Math.max(0, e - 0.004)));
+  drawPlane(p.sx, p.sy, Math.atan2(q.sy - back.sy, q.sx - back.sx), hexA(col, 0.9), '#fff4dc');
+}
+
+btnReplay.addEventListener('click', () => { replay ? stopReplay() : askReplay(); });
+rspeedBtns.forEach(b => b.addEventListener('click', () => {
+  const v = Number(b.dataset.rspeed);
+  if (replay) {   // change speed mid-replay without the plane jumping
+    const now = performance.now(), k = (now - replay.t0) / replayDur();
+    replaySpeed = v; replay.t0 = now - k * replayDur();
+    if (cam.auto) cam.auto.tau = 0.35 / Math.sqrt(v);
+  } else replaySpeed = v;
+  rspeedBtns.forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
 
 // ── The details card ──
 function showMapDetail() {

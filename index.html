@@ -201,6 +201,15 @@
       </div>
     </div>
 
+    <div class="replay-row">
+      <button type="button" id="btn-replay" class="replay-btn"><span class="replay-icon" aria-hidden="true"></span><span id="replay-label">replay</span></button>
+      <div class="segmented replay-speed" role="group" aria-label="replay speed">
+        <button type="button" data-rspeed="1" aria-pressed="true">1x</button>
+        <button type="button" data-rspeed="2" aria-pressed="false">2x</button>
+        <button type="button" data-rspeed="5" aria-pressed="false">5x</button>
+      </div>
+    </div>
+
     <div id="map-detail" class="map-detail" hidden></div>
     <p id="map-hint" class="map-hint">tap a route or a city for details</p>
   </section>
@@ -232,6 +241,7 @@
 </div>
 
 <!-- flying with no module chosen -->
+<div id="replay-cap" class="pill replay-cap" aria-live="polite" hidden></div>
 <div id="confirm" class="modal-backdrop" hidden>
   <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
     <h2 id="confirm-title">no module selected</h2>

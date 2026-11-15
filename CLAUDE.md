@@ -90,6 +90,10 @@ The filename must stay `index.html` for Pages to serve it.
   go to `mapTap`/`mapHit` instead of `onCityTap`. Colour = destination continent (`c.ct`,
   from `CONTINENTS`, every city has one). "Visited" = landed in. Dates come from the
   `date` field (all flights have it). No recentre button or drift-back on this tab.
+  Replay (`replay`, `startReplay`/`stopReplay`): draws from its own growing `routes`/`cities`
+  via `addToMap`; 1.25 s per flight ÷ speed; any interaction or filter change stops it
+  (`interacted()` and `applyMapFilters()` both end it). The yes/no box is `askConfirm()`,
+  shared with the no-module warning.
 - Old flights: no `flightMin` = saved before phase 0 → pass says "before modules", and
   phase 4 stats leave them out. Newer flights with no `module` count as uncategorised.
 - Modules: her list is `MODULE_GROUPS` in app.js (year 4/5 modules a–c, year 6, cpp, exam prep);

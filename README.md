@@ -55,6 +55,10 @@ pick two cities, press fly, and study for as long as the flight takes.
   continent, module, and a date range slider (week / month / all, or tap the dates for
   exact from/to pickers), which covers every flight ever saved. a summary line counts flights, distance and countries. tapping a
   route or a city shows how many flights, time studied and when it was last flown.
+- **replay:** a button on the map tab plays the filtered flights oldest first: a plane
+  whizzes from a to b in 1.25 s (1x, 2x or 5x), leaving its arc, while the globe follows,
+  a caption names each flight and the summary counts up. over 60 s it asks first and
+  suggests a faster speed or tighter filters. touching the globe or a filter stops it.
 - **speed:** 1x–10000x, chosen before takeoff or changed mid-flight without the
   progress jumping. sped-up flights record the real time spent too.
 - **as an app:** in safari, share → add to home screen (iphone/ipad) or file → add to
