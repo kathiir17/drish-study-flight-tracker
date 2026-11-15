@@ -41,9 +41,11 @@ async function loadFlights() {
 
 // Save a new flight. Resolves as soon as it is stored on the device (it is not
 // held up by a slow or missing connection); the upload continues in the background.
-// Returns the new flight's id.
+// Pass f.id to choose the document id (so a repeat save of the same flight is refused
+// by the rules rather than duplicated); otherwise a random one is made.
+// Returns the flight's id.
 async function addFlight(f) {
-  const ref = doc(flights); // new random id
+  const ref = f.id ? doc(flights, f.id) : doc(flights);
   const data = { seq: f.seq, from: f.from, to: f.to, km: f.km, dur: f.dur, realDur: f.realDur ?? null, date: f.date };
   const upload = setDoc(ref, data);
   upload.catch(e => console.error("Flight upload failed", e));

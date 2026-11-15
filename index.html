@@ -192,14 +192,37 @@ topoScript.onload = () => {
 document.head.appendChild(topoScript);
 
 // ── Audio ─────────────────────────────────────────────────
-let audioCtx = null;
-function getAudioCtx() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  return audioCtx;
+// Browsers (iOS Safari especially) only allow sound after a tap or key press, so the
+// audio context is created and "unlocked" on the first interaction, and woken up again
+// whenever the browser has paused it (tab hidden, phone locked, call came in).
+let audioCtx = null, audioUnlocked = false;
+function unlockAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  if (!audioCtx) audioCtx = new AC();
+  if (audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+  if (!audioUnlocked) {
+    // a silent one-sample sound played inside the tap unlocks older iOS versions
+    try {
+      const s = audioCtx.createBufferSource();
+      s.buffer = audioCtx.createBuffer(1, 1, 22050);
+      s.connect(audioCtx.destination); s.start(0);
+    } catch(e) {}
+    audioUnlocked = true;
+  }
 }
+['pointerdown','touchend','keydown'].forEach(ev => window.addEventListener(ev, unlockAudio, { passive:true }));
+
 function playChime(type) {
+  const ac = audioCtx;
+  if (!ac) return; // no tap yet (e.g. a restored flight landing on page load): stay silent
+  if (ac.state === 'running') { scheduleNotes(ac, type); return; }
+  // paused: try to wake it, but don't let a stale chime play much later
+  Promise.race([ac.resume(), new Promise((_, rej) => setTimeout(rej, 1000))])
+    .then(() => scheduleNotes(ac, type)).catch(() => {});
+}
+function scheduleNotes(ac, type) {
   try {
-    const ac = getAudioCtx();
     let notes;
     if      (type === 'takeoff') notes = [{f:330,d:0.3},{f:392,d:0.3},{f:523,d:0.5}];
     else if (type === 'halfway') notes = [{f:440,d:0.4},{f:554,d:0.4},{f:659,d:0.4},{f:880,d:0.6}];
@@ -222,30 +245,18 @@ function playChime(type) {
 }
 
 // ── Pomodoro ──────────────────────────────────────────────
+// Runs on real wall-clock time from when the flight started. The current phase is
+// worked out from the clock (not by counting ticks), so it can't drift or get stuck.
 const POMO_FOCUS = 50 * 60 * 1000;
 const POMO_BREAK = 10 * 60 * 1000;
-let pomo = null;
+const POMO_CYCLE = POMO_FOCUS + POMO_BREAK;
+let pomo = null; // { start, onBreak } while a pomodoro flight is in the air
 
-function initPomo() {
-  pomo = { onBreak: false, phaseStart: Date.now() };
-}
-function tickPomo() {
-  if (!pomo || !flight) return;
-  const elapsed = Date.now() - pomo.phaseStart;
-  const limit = pomo.onBreak ? POMO_BREAK : POMO_FOCUS;
-  if (elapsed >= limit) {
-    pomo.onBreak = !pomo.onBreak;
-    pomo.phaseStart = Date.now();
-    if (pomo.onBreak) {
-      playChime('break');
-      banner.next = 'break time. step away 🧘';
-      banner.fading = true;
-    } else {
-      playChime('resume');
-      banner.next = getBannerMsg(flight ? flight.progress : 0);
-      banner.fading = true;
-    }
-  }
+function pomoPhase(now) {
+  const pos = Math.max(0, now - pomo.start) % POMO_CYCLE;
+  return pos < POMO_FOCUS
+    ? { onBreak:false, left:POMO_FOCUS - pos, limit:POMO_FOCUS }
+    : { onBreak:true,  left:POMO_CYCLE - pos, limit:POMO_BREAK };
 }
 
 // ── Banner ────────────────────────────────────────────────
@@ -256,6 +267,7 @@ const MESSAGES = [
   {threshold:0.75, text:"almost done... 🥰"},
   {threshold:1,    text:"landed. great session 🎉"},
 ];
+const BREAK_MSG = 'break time. step away 🧘';
 let banner = { current:"enter a route to begin", next:null, opacity:1, fading:false };
 
 function getBannerMsg(p) {
@@ -264,8 +276,7 @@ function getBannerMsg(p) {
   return msg;
 }
 function updateBanner(p) {
-  if (pomo && pomo.onBreak) return;
-  const msg = getBannerMsg(p);
+  const msg = (pomo && pomo.onBreak) ? BREAK_MSG : getBannerMsg(p);
   if (msg !== banner.current && msg !== banner.next) {
     banner.next = msg; banner.fading = true;
   }
@@ -275,64 +286,151 @@ function resetBanner() {
 }
 
 // ── Flight ────────────────────────────────────────────────
-let flight = null, flightTimer = null;
+// Timing model: flight time runs at `speed` × real time. We store how much flight time
+// had passed (virtMs) at the moment of the last speed change (lastT); everything else is
+// worked out from the clock. So a speed change never makes progress jump, and a tick
+// that runs late (background tab) still gives the right numbers.
+let flight = null;
+const chkPomo  = document.getElementById('chk-pomo');
+const speedSel = document.getElementById('speed-sel');
+const btnStop  = document.getElementById('btn-stop');
+
+function selectedSpeed() { return parseFloat(speedSel.value) || 1; }
+function findCity(name) { return CITIES.find(c => c.n === String(name).trim().toLowerCase()); }
+function newFlightId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+function flightVirt(now) { return flight.virtMs + (now - flight.lastT) * flight.speed; }
+function flightProgress(now) { return flight.landed ? 1 : Math.min(1, flightVirt(now) / flight.totalMs); }
+
+// The flight in the air is kept on this device so a refresh (or reopening the tab)
+// carries on where it was. Only the unfinished flight lives here; finished flights are
+// in Firestore. If the browser clears this, only the current flight is lost.
+const ACTIVE_KEY = 'activeFlight';
+function persistFlight() {
+  try {
+    if (!flight || flight.landed) { localStorage.removeItem(ACTIVE_KEY); return; }
+    localStorage.setItem(ACTIVE_KEY, JSON.stringify({
+      v:1, id:flight.id, from:flight.from.n, to:flight.to.n, startT:flight.startT,
+      virtMs:flight.virtMs, lastT:flight.lastT, speed:flight.speed, sped:flight.sped,
+      pomoStart: pomo ? pomo.start : null,
+    }));
+  } catch(e) {}
+}
+function restoreFlight() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch(e) {}
+  if (!s || s.v !== 1) return;
+  const from = findCity(s.from), to = findCity(s.to);
+  if (!from || !to || from === to) { try { localStorage.removeItem(ACTIVE_KEY); } catch(e) {} return; }
+  launch({ ...s, from, to }, true);
+}
 
 function startFlight(from, to) {
   stopFlight();
-  const km = haversine(from.lat,from.lng,to.lat,to.lng);
-  const totalMs = (km/900)*3600000;
-  flight = { from, to, km, totalMs, startTime:Date.now(), progress:0, halfwayChimed:false };
-  const usePomo = document.getElementById('chk-pomo').checked;
-  document.getElementById('chk-pomo').disabled = true;
-  if (usePomo) initPomo(); else pomo = null;
-  document.getElementById('btn-stop').style.display = '';
-  updateBanner(0);
-  playChime('takeoff');
-  function tick() {
-    const speed = parseFloat(document.getElementById('speed-sel').value);
-    const elapsed = (Date.now()-flight.startTime)*speed;
-    flight.progress = Math.min(1, elapsed/flight.totalMs);
-    const pct = (flight.progress*100).toFixed(1);
-    const flown = Math.round(flight.progress*km);
-    document.getElementById('progress-bar').style.width = pct+'%';
-    document.getElementById('status').textContent = pct+'% · '+flown+' / '+Math.round(km)+' km';
-    updateBanner(flight.progress);
-    tickPomo();
-    if (flight.progress >= 0.5 && !flight.halfwayChimed) {
-      flight.halfwayChimed = true;
-      playChime('halfway');
-    }
-    if (flight.progress >= 1) {
-      clearInterval(flightTimer);
-      saveToHistory(from,to,km,km/900);
-      playChime('landing');
-      document.getElementById('status').textContent = 'landed! '+Math.round(km)+' km';
-      document.getElementById('btn-stop').style.display = 'none';
-    }
-  }
+  const now = Date.now(), speed = selectedSpeed();
+  launch({ id:newFlightId(), from, to, startT:now, virtMs:0, lastT:now, speed,
+           sped: speed > 1, pomoStart: chkPomo.checked ? now : null }, false);
+}
+
+function launch(s, restored) {
+  const km = haversine(s.from.lat, s.from.lng, s.to.lat, s.to.lng);
+  flight = { id:s.id, from:s.from, to:s.to, km, totalMs:(km/900)*3600000,
+             startT:s.startT, virtMs:s.virtMs, lastT:s.lastT, speed:s.speed, sped:!!s.sped,
+             landed:false, halfwayChimed:false };
+  const now = Date.now();
+  pomo = s.pomoStart != null ? { start:s.pomoStart, onBreak:false } : null;
+  if (pomo) pomo.onBreak = pomoPhase(now).onBreak;               // no chime for the current phase
+  if (restored) flight.halfwayChimed = flightProgress(now) >= 0.5; // or for a halfway already passed
+  chkPomo.checked = !!pomo; chkPomo.disabled = true;
+  speedSel.value = String(flight.speed);
+  btnStop.style.display = '';
+  persistFlight();
+  if (!restored) playChime('takeoff');
   tick();
-  flightTimer = setInterval(tick, 500);
+}
+
+function tick() {
+  if (!flight || flight.landed) return;
+  const now = Date.now();
+  const virt = flightVirt(now);
+  if (virt >= flight.totalMs) { land(); return; }
+  const p = virt / flight.totalMs;
+  if (pomo) {
+    const onBreak = pomoPhase(now).onBreak;
+    if (onBreak !== pomo.onBreak) { pomo.onBreak = onBreak; playChime(onBreak ? 'break' : 'resume'); }
+  }
+  if (p >= 0.5 && !flight.halfwayChimed) { flight.halfwayChimed = true; playChime('halfway'); }
+  updateBanner(p);
+  const km = Math.round(flight.km);
+  document.getElementById('progress-bar').style.width = (p*100).toFixed(1)+'%';
+  document.getElementById('status').textContent = (p*100).toFixed(1)+'% · '+Math.round(p*flight.km)+' / '+km+' km';
+}
+
+function land() {
+  // the exact moment it reached 100%, even if this tick ran late or the page was closed
+  const landT = Math.max(flight.startT, flight.lastT + (flight.totalMs - flight.virtMs) / flight.speed);
+  flight.landed = true;
+  pomo = null;
+  chkPomo.disabled = false;
+  btnStop.style.display = 'none';
+  persistFlight(); // clears the stored in-progress flight
+  updateBanner(1);
+  document.getElementById('progress-bar').style.width = '100%';
+  document.getElementById('status').textContent = 'landed! '+Math.round(flight.km)+' km';
+  playChime('landing');
+  saveToHistory(flight, landT);
 }
 
 function stopFlight() {
-  if (flightTimer) clearInterval(flightTimer);
-  flightTimer=null; flight=null; pomo=null;
-  document.getElementById('chk-pomo').disabled = false;
+  flight = null; pomo = null;
+  persistFlight(); // clears the stored in-progress flight
+  chkPomo.disabled = false;
   resetBanner();
   document.getElementById('progress-bar').style.width='0';
   document.getElementById('status').textContent='ready';
-  document.getElementById('btn-stop').style.display='none';
+  btnStop.style.display='none';
 }
 
+speedSel.addEventListener('change', () => {
+  if (!flight || flight.landed) return;
+  tick();                        // land first if it was already due at the old speed
+  if (flight.landed) return;
+  const now = Date.now();
+  flight.virtMs = flightVirt(now); flight.lastT = now;
+  flight.speed = selectedSpeed();
+  if (flight.speed > 1) flight.sped = true;
+  persistFlight();
+  tick();
+});
+
+// Background tabs slow normal timers right down (Chrome: to once a minute), which made
+// chimes, pomodoro switches and the landing save late. A tiny Web Worker's timer is not
+// slowed as much, so it drives tick(). Fallback: plain setInterval.
+(function startTicker() {
+  try {
+    const src = 'setInterval(function(){postMessage(0)},500)';
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type:'text/javascript' })));
+    w.onmessage = tick;
+  } catch(e) {
+    setInterval(tick, 500);
+  }
+})();
+// Coming back to the tab or phone: catch up straight away and wake the audio.
+function onReturn() {
+  if (document.hidden) return;
+  if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+  tick();
+}
+document.addEventListener('visibilitychange', onReturn);
+window.addEventListener('pageshow', onReturn);
+window.addEventListener('focus', onReturn);
+
 document.getElementById('btn-fly').addEventListener('click', () => {
-  const fn = document.getElementById('inp-from').value.trim();
-  const tn = document.getElementById('inp-to').value.trim();
-  const from = CITIES.find(c => c.n.toLowerCase()===fn.toLowerCase());
-  const to   = CITIES.find(c => c.n.toLowerCase()===tn.toLowerCase());
+  const from = findCity(document.getElementById('inp-from').value);
+  const to   = findCity(document.getElementById('inp-to').value);
   if (!from) { alert('departure city not found'); return; }
   if (!to)   { alert('destination city not found'); return; }
-  if (from.n===to.n) { alert('pick two different cities'); return; }
-  startFlight(from,to);
+  if (from === to) { alert('pick two different cities'); return; }
+  startFlight(from, to);
 });
 
 // ── Flight history (stored via db.js) ─────────────────────
@@ -341,22 +439,24 @@ const dbReady = new Promise(res => {
   if (window.DB) res(window.DB);
   else window.addEventListener('db-ready', () => res(window.DB), { once: true });
 });
-function todayDDMMYYYY() {
-  const d = new Date();
+function ddmmyyyy(d) {
   return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
 }
 
-async function saveToHistory(from, to, km, hours) {
-  const speed = parseFloat(document.getElementById('speed-sel').value);
+// f = the landed flight, landT = the real time it landed.
+// The flight's own id is reused as the document id, so if two open tabs both land the
+// same flight, the second save is refused by the rules (no edits) instead of duplicating.
+async function saveToHistory(f, landT) {
   try {
     const DB = await dbReady;
     const h = await DB.loadFlights();
     await DB.addFlight({
-      seq: h.reduce((m,f) => Math.max(m, f.seq), 0) + 1,
-      from:from.n, to:to.n, km:Math.round(km),
-      dur:formatDur(hours),
-      realDur: speed>1 ? formatDur(hours/speed) : null,
-      date:todayDDMMYYYY()
+      id: f.id,
+      seq: h.reduce((m,x) => Math.max(m, x.seq), 0) + 1,
+      from:f.from.n, to:f.to.n, km:Math.round(f.km),
+      dur:formatDur(f.km/900),
+      realDur: f.sped ? formatDur((landT - f.startT)/3600000) : null,
+      date:ddmmyyyy(new Date(landT))
     });
   } catch(e) {
     console.error(e);
@@ -436,9 +536,8 @@ setupAC('inp-to');
 
 function drawPomoCircle() {
   if (!pomo) return;
-  const limit = pomo.onBreak ? POMO_BREAK : POMO_FOCUS;
-  const elapsed = Date.now() - pomo.phaseStart;
-  const fraction = Math.min(1, elapsed / limit);
+  const ph = pomoPhase(Date.now());
+  const fraction = 1 - ph.left / ph.limit;
   const pad = 14, offset = 112; // below the real-time circle
   const cx = pad + 48, cy = pad + 48 + offset, cr = 36;
 
@@ -459,7 +558,7 @@ function drawPomoCircle() {
   ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
 
   // label
-  const remMs = Math.max(0, limit - elapsed);
+  const remMs = ph.left;
   const remSec = Math.ceil(remMs / 1000);
   const m = Math.floor(remSec / 60), s = remSec % 60;
   const line1 = m > 0 ? m + 'm' : s + 's';
@@ -512,7 +611,7 @@ function drawCities() {
 }
 
 function drawFlight() {
-  const {from,to,progress:prog}=flight;
+  const {from,to}=flight, prog=flightProgress(Date.now()); // per frame, so the plane moves smoothly
   const p1=ll2xyz(from.lat,from.lng), p2=ll2xyz(to.lat,to.lng);
   const steps=120;
   ctx.setLineDash([4,4]); ctx.beginPath(); let pen=false;
@@ -541,8 +640,8 @@ function drawFlight() {
 }
 
 function drawTimer() {
-  const speed=parseFloat(document.getElementById('speed-sel').value);
-  const remFlight=flight.totalMs*(1-flight.progress);
+  const speed=flight.speed;
+  const remFlight=Math.max(0, flight.totalMs-flightVirt(Date.now()));
   const remReal=remFlight/speed;
   const singleRow=speed===1;
   const line1='✈  '+formatTime(remFlight);
@@ -561,10 +660,9 @@ function drawTimer() {
 }
 
 function drawCircleTimer() {
-  const speed=parseFloat(document.getElementById('speed-sel').value);
-  const remReal=flight.totalMs*(1-flight.progress)/speed;
-  const totalReal=flight.totalMs/speed;
-  const fraction=1-(remReal/totalReal);
+  const now=Date.now();
+  const remReal=Math.max(0, flight.totalMs-flightVirt(now))/flight.speed;
+  const fraction=flightProgress(now);
   const pad=14, cx=pad+48, cy=pad+48, cr=36;
   ctx.beginPath(); ctx.arc(cx,cy,cr+8,0,Math.PI*2);
   ctx.fillStyle='rgba(10,20,40,0.80)'; ctx.fill();
@@ -611,13 +709,14 @@ function loop() {
   drawGlobe();
   drawCities();
   drawBanner();
-  if (flight) drawFlight();
-  if (flight) drawTimer();
-  if (flight) drawCircleTimer();
-  if (flight) drawPomoCircle();
+  if (flight) drawFlight();                      // a landed route stays on the globe
+  if (flight && !flight.landed) drawTimer();
+  if (flight && !flight.landed) drawCircleTimer();
+  drawPomoCircle();                              // draws nothing when pomo is off or landed
   requestAnimationFrame(loop);
 }
 loop();
+restoreFlight(); // pick up a flight that was in the air before a refresh
 </script>
 </body>
 </html>
