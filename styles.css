@@ -5,6 +5,13 @@
    narrow screens (iphone): the same panel docks at the bottom; the globe sits above it. */
 
 :root {
+  /* boarding pass paper */
+  --paper: #eef2f8;
+  --paper-ink: #13213b;
+  --paper-ink-2: #4d5c78;
+  --paper-ink-3: #8592a9;
+  --paper-amber: #d98b1c;
+  --paper-green: #23905f;
   /* colour */
   --sky-0: #040914;            /* deepest night, page background */
   --sky-1: #0b1832;            /* horizon glow at the bottom of the sky */
@@ -375,17 +382,7 @@ body.paused .phase::before, body.paused .live-dot { background: var(--ink-3); bo
 .sheet-head { display: flex; align-items: baseline; justify-content: space-between; padding: 14px 2px 8px; }
 .sheet-head h2 { font: 650 var(--t-lg) var(--font-round); }
 .sheet-count { font-size: var(--t-sm); color: var(--ink-3); }
-.hist-list { margin: 0 -10px; user-select: text; -webkit-user-select: text; }
-.hist-row { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; }
-.hist-row + .hist-row { border-top: 1px solid rgba(255, 255, 255, .05); }
-.hist-row:hover { background: rgba(255, 255, 255, .04); }
-.hist-main { flex: 1; min-width: 0; }
-.hist-route { font: 600 var(--t-md) var(--font-round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hist-route .arrow { color: var(--amber); margin: 0 .35em; }
-.hist-detail { margin-top: 3px; font-size: var(--t-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.hist-del { flex: none; height: 30px; min-width: 30px; padding: 0 8px; border-radius: 9px; color: var(--ink-3); font-size: var(--t-sm); }
-.hist-del:hover { background: rgba(255, 143, 135, .12); color: var(--rose); }
-.hist-del.armed { background: rgba(255, 143, 135, .16); color: var(--rose); font-size: var(--t-xs); }
+.hist-list { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 6px; }
 .hist-empty { padding: 28px 16px; text-align: center; color: var(--ink-3); font-size: var(--t-sm); }
 .soon { padding: 22px 6px 10px; }
 .soon h2 { font: 650 var(--t-lg) var(--font-round); }
@@ -397,3 +394,108 @@ body.paused .phase::before, body.paused .live-dot { background: var(--ink-3); bo
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ── boarding passes ───────────────────────────────────── */
+.pass { position: relative; color: var(--paper-ink); }
+.pass-main {
+  position: relative; overflow: hidden;
+  padding: 14px 16px 14px;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+}
+.pass-main::before {                       /* faint dotted world map */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: var(--pass-map, none) center 40% / 115% auto no-repeat;
+  opacity: .1;
+}
+.pass-main > * { position: relative; }
+.pass-top { display: flex; align-items: center; gap: 8px; }
+.pass-date { flex: 1; font-size: var(--t-xs); color: var(--paper-ink-2); }
+.pass-status {
+  padding: 2px 8px; border-radius: 6px;
+  font: 600 10.5px var(--font-round); letter-spacing: .02em;
+  color: var(--paper-amber); background: rgba(217, 139, 28, .12);
+}
+.pass-status[data-status="landed"] { color: var(--paper-green); background: rgba(35, 144, 95, .12); }
+.pass-status[data-status="holding"], .pass-status[data-status="boarding"] { color: var(--paper-ink-2); background: rgba(19, 33, 59, .07); }
+.pass-route { display: grid; grid-template-columns: auto 1fr auto; align-items: end; gap: 10px; margin-top: 10px; }
+.pass-end { display: flex; flex-direction: column; min-width: 0; }
+.pass-end.to { text-align: right; }
+.pass-code { font: 800 32px/1 var(--font-round); letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.pass-city { margin-top: 4px; font-size: var(--t-xs); color: var(--paper-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+.pass-end.to .pass-city { margin-left: auto; }
+.pass-mid { display: flex; flex-direction: column; align-items: center; padding-bottom: 2px; min-width: 0; }
+.pass-track { position: relative; width: 100%; height: 16px; }
+.pass-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1.5px dashed rgba(19, 33, 59, .25); }
+.pass-plane {
+  position: absolute; top: 0; width: 16px; height: 16px; fill: var(--paper-amber);
+  left: calc(50% - 8px); transform: rotate(90deg);
+}
+.pass.live .pass-plane { left: calc(var(--p, 0) * (100% - 16px)); }
+.pass-dur { margin-top: 4px; font: 600 var(--t-xs) var(--font-round); color: var(--paper-ink-2); }
+.pass-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 10px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(19, 33, 59, .09); }
+.pass-field { min-width: 0; }
+.pass-field.wide { grid-column: 1 / -1; }
+.pass-field dt { font-size: 10.5px; color: var(--paper-ink-3); }
+.pass-field dd { margin-top: 1px; font: 600 var(--t-sm) var(--font-round); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pass-field.mono dd { font: 600 var(--t-sm) ui-monospace, "SF Mono", Menlo, monospace; }
+.pass-field.muted dd { color: var(--paper-ink-3); font-weight: 500; }
+
+/* the stub with its barcode, and the tear line between them */
+.pass-perf { height: 0; margin: 0 14px; border-top: 2px dashed rgba(238, 242, 248, .9); transform-origin: left; position: relative; top: -1px; z-index: 1; }
+.pass.live .pass-main { border-radius: 16px 16px 0 0; }
+.pass-stub {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 18px 12px; border-radius: 0 0 16px 16px;
+  background: var(--paper); box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  transform-origin: 0 0;
+}
+.pass-barcode { width: 100%; height: 40px; fill: var(--paper-ink); transform-origin: left; }
+.pass-stub-code { font: 500 10px ui-monospace, "SF Mono", Menlo, monospace; color: var(--paper-ink-3); letter-spacing: .2em; }
+/* once torn: real zigzag edges, cut with a mask */
+.pass.torn .pass-main {
+  border-radius: 16px 16px 0 0; padding-bottom: 20px;
+  -webkit-mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 12px 100%;
+          mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / 12px 100%;
+}
+.pass.torn .pass-stub {
+  padding-top: 18px;
+  -webkit-mask: conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) 50% / 12px 100%;
+          mask: conic-gradient(from 135deg at top, #0000, #000 1deg 89deg, #0000 90deg) 50% / 12px 100%;
+}
+.pass.torn.live .pass-main { filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .3)); box-shadow: none; }
+/* printing: fields appear one by one */
+.pass .pf { transition: opacity .25s ease, transform .25s ease; }
+.pass.printing .pf:not(.in) { opacity: 0; transform: translateY(4px); }
+.pass.printing .pass-barcode { transform: scaleX(0); }
+.pass.printing .pass-perf { transform: scaleX(0); }
+
+/* landed stamp */
+.pass-stamp {
+  position: absolute; right: 14px; top: 52%;
+  padding: 4px 12px; border: 3px solid var(--paper-green); border-radius: 8px;
+  font: 800 20px var(--font-round); letter-spacing: .06em; color: var(--paper-green);
+  background: rgba(238, 242, 248, .6);
+  transform: rotate(-12deg); opacity: 0; pointer-events: none;
+}
+
+/* docked below the sidebar during a flight */
+.pass-dock { position: fixed; z-index: 2; pointer-events: none; }
+
+/* passes tab */
+.hist-totals { display: flex; align-items: center; gap: 10px; margin: 0 2px 12px; }
+.hist-total-label { font-size: var(--t-xs); color: var(--ink-3); }
+.hist-total { flex: 1; font: 650 var(--t-md) var(--font-round); font-variant-numeric: tabular-nums; }
+.segmented.unit { flex: none; width: 92px; }
+.segmented.unit button:last-child { flex: 1; }
+.pass.list { cursor: pointer; border-radius: 16px; outline-offset: 3px; }
+.pass.list .pass-main { box-shadow: 0 4px 14px rgba(0, 0, 0, .25); transition: transform .15s ease, box-shadow .15s ease; }
+.pass.list:hover .pass-main { transform: translateY(-1px); }
+.pass.list.selected .pass-main { box-shadow: 0 0 0 2px var(--amber), 0 6px 20px rgba(255, 189, 90, .25); }
+.pass .hist-del {
+  flex: none; height: 24px; min-width: 24px; padding: 0 6px; margin: -2px -6px -2px 0; border-radius: 7px;
+  color: var(--paper-ink-3); font-size: var(--t-xs); pointer-events: auto;
+}
+.pass .hist-del:hover { background: rgba(200, 60, 50, .1); color: #c2392e; }
+.pass .hist-del.armed { background: rgba(200, 60, 50, .12); color: #c2392e; }

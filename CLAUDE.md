@@ -78,6 +78,15 @@ The filename must stay `index.html` for Pages to serve it.
 - Pomodoro: custom focus/break minutes (default 50/10, remembered per device in
   `pomoPrefs`); each flight stores its own lengths. Phase derived from the clock.
 - Stop and delete both need two taps.
+- Boarding passes (app.js "Boarding passes"): built from a flight's record, nothing extra
+  stored. Airport codes = `AIRPORTS` (every city's `c.a`); seat/gate = `seatGate(id)`, a hash
+  of the flight id, so they never change. Takeoff: pass prints below the sidebar
+  (`#pass-dock`), tears its stub, stays docked; landing: stamp, then flies into the passes
+  tab. A stopped flight's pass fades. Pass field elements use class `.pf` (NOT `.fill`,
+  which is the progress bar). Passes tab: every flight as a pass, total in km or miles
+  (`distUnit`, per device), tapping a pass shows its route (`viewRoute`).
+- Old flights: no `flightMin` = saved before phase 0 → pass says "before modules", and
+  phase 4 stats leave them out. Newer flights with no `module` count as uncategorised.
 - Modules: her list is `MODULE_GROUPS` in app.js (year 4/5 modules a–c, year 6, cpp, exam prep);
   ones she adds go to `modules/{name}` ("your modules"). The plan card's module row opens
   a picker below the sidebar (above the panel on iPhone). Flying with none shows a

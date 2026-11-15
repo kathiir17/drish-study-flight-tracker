@@ -112,7 +112,13 @@ manifest, split into index.html / styles.css / app.js. original brief below.
   york both ways, london–tokyo, london–sydney, dubai–singapore, la–tokyo, …). show kdot
   the comparison table before shipping.
 
-## phase 3 — boarding passes and miles
+## phase 3 — boarding passes and miles (done)
+
+built as planned, plus: tapping a pass shows its route on the globe; km/miles toggle (one
+unit at a time, per device). stats rule agreed with kdot: flights without `flightMin`
+(saved before phase 0) get passes but are left out of phase 4 stats; flights since then
+with no module count as uncategorised.
+
 
 - at takeoff, show a generated boarding pass (from/to with city codes, module, date,
   duration, seat/gate flavour), then the stub-rip animation.

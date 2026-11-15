@@ -5,6 +5,8 @@ from playwright.sync_api import sync_playwright
 BASE = "http://127.0.0.1:8765/"
 FAKE_DB = """
 const flights = [
+  {id:'new1', seq:3, from:'london', to:'paris', km:343, dur:'42m 01s', realDur:null, date:'14/11/2026', flightMin:42, realMin:42,
+   startedAt:'2026-11-14T09:00:00Z', endedAt:'2026-11-14T09:42:00Z', module:'cardiology'},
   {id:'evil', seq:2, from:'<img src=x onerror="window.__xss=1">', to:'<b>bold</b>', km:1, dur:'1m', realDur:null, date:'01/01/2026'},
   {id:'a1', seq:1, from:'jaffna', to:'singapore', km:2580, dur:'2h 52m', realDur:null, date:'02/11/2026'},
 ];
@@ -116,7 +118,7 @@ with sync_playwright() as p:
     page.click(".hist-del >> nth=0")
     ok(page.evaluate("window.__deleted.length") == 0, "first ✕ only asks")
     page.click(".hist-del >> nth=0"); page.wait_for_timeout(300)
-    ok(page.evaluate("window.__deleted") == ["evil"], "second ✕ deletes that one flight")
+    ok(page.evaluate("window.__deleted") == ["new1"], "second ✕ deletes that one flight (the newest, listed first)")
     ok(page.evaluate("CX") > 372 + 16, "globe stays visible beside the sidebar on the passes tab")
     page.click(".tab[data-view=fly]")
     ok(not page.is_hidden("#card-plan"), "back to fly")
@@ -403,6 +405,108 @@ with sync_playwright() as p:
     page.evaluate("interacted()"); page.wait_for_timeout(200)
     bb, pt = page.evaluate("[document.getElementById('btn-recentre').getBoundingClientRect().bottom, document.getElementById('panel').getBoundingClientRect().top]")
     ok(page.is_visible("#btn-recentre") and bb <= pt, f"sits just above the bottom panel ({bb:.0f} <= {pt:.0f})")
+    ok(not errs, "no console errors: " + str(errs))
+    ctx.close()
+
+    print("boarding passes: data")
+    ctx, page, errs = new_page(b, viewport={"width": 1440, "height": 900})
+    page.goto(BASE); page.wait_for_timeout(1500)
+    page.evaluate("localStorage.clear()")
+    codes = page.evaluate("CITIES.map(c => c.a)")
+    ok(len(codes) == 70 and all(isinstance(c, str) and len(c) == 3 and c.isupper() for c in codes) and len(set(codes)) == 70,
+       "all 70 cities have their own 3-letter airport code")
+    ok(page.evaluate("[findCity('london').a, findCity('tokyo').a, findCity('jaffna').a].join()") == "LHR,HND,JAF", "london LHR, tokyo HND, jaffna JAF")
+    sg = page.evaluate("[seatGate('abc123'), seatGate('abc123'), seatGate('zzz999')]")
+    import re
+    ok(sg[0] == sg[1] and sg[0] != sg[2], f"seat and gate never change for a flight ({sg[0]['seat']}, gate {sg[0]['gate']})")
+    ok(all(re.fullmatch(r"([1-9]|[1-3][0-9])[A-F]", x["seat"]) and re.fullmatch(r"[A-G]([1-9]|[1-3][0-9]|40)", x["gate"]) for x in sg), "seat like 14C, gate like B23")
+
+    print("boarding passes: takeoff")
+    page.evaluate("chooseModule('cardiology')")
+    page.fill("#inp-from", "london"); page.fill("#inp-to", "tokyo"); fly_click(page); page.wait_for_timeout(700)
+    ok(page.locator("#pass-dock .pass.live").count() == 1 and page.is_visible("#pass-dock"), "pressing fly brings in a boarding pass")
+    ok(page.evaluate("document.querySelector('#pass-dock .pass').classList.contains('printing')"), "it starts out filling itself in")
+    dt, pb = page.evaluate("[document.getElementById('pass-dock').getBoundingClientRect().top, document.getElementById('panel').getBoundingClientRect().bottom]")
+    ok(dt > pb, f"just below the sidebar ({dt:.0f} > {pb:.0f})")
+    page.screenshot(path="/tmp/pass-1-printing.png")
+    page.wait_for_timeout(2600); page.screenshot(path="/tmp/pass-2-filled.png")
+    page.wait_for_timeout(5000)
+    live = "#pass-dock .pass"
+    ok(page.evaluate(f"document.querySelector('{live}').classList.contains('torn')") and page.locator(f"{live} .pass-stub").count() == 0,
+       "after takeoff the stub has torn off and gone")
+    ok(page.locator(f"{live} .pass-code").all_inner_texts() == ["LHR", "HND"], "pass reads LHR → HND")
+    ok("cardiology" in page.inner_text(live) and page.inner_text(f"{live} .pass-status") == "in flight", "module shown; status 'in flight'")
+    ok(page.is_visible(live), "the pass stays docked during the flight")
+    page.evaluate("flight.virtMs = flight.totalMs * 0.5; flight.lastT = Date.now()"); page.wait_for_timeout(300)
+    pl = page.evaluate("parseFloat(getComputedStyle(document.querySelector('#pass-dock .pass')).getPropertyValue('--p'))")
+    ok(0.4 < pl < 0.6, f"the little plane on the pass follows the flight ({pl:.2f})")
+    page.screenshot(path="/tmp/pass-3-docked.png")
+    page.click("#btn-pause"); page.wait_for_timeout(200)
+    ok(page.inner_text(f"{live} .pass-status") == "holding", "paused: status 'holding'")
+    page.click("#btn-pause")
+    page.click(".tab[data-view=passes]"); page.wait_for_timeout(300)
+    ok(page.is_hidden("#pass-dock"), "the docked pass hides on other tabs")
+    page.click(".tab[data-view=fly]"); page.wait_for_timeout(200)
+    ok(page.is_visible("#pass-dock"), "and comes back on the fly tab")
+    page.reload(); page.wait_for_timeout(1200)
+    ok(page.evaluate("document.querySelector('#pass-dock .pass')?.classList.contains('torn')") and
+       not page.evaluate("document.querySelector('#pass-dock .pass').classList.contains('printing')"), "refresh mid-flight: pass is just there, no replay")
+
+    print("boarding passes: landing")
+    page.evaluate("flight.virtMs = flight.totalMs + 1; tick()"); page.wait_for_timeout(500)
+    ok(page.locator("#pass-dock .pass-stamp").count() == 1 and page.inner_text("#pass-dock .pass-status") == "landed", "landing: 'landed' stamp")
+    page.screenshot(path="/tmp/pass-4-landed.png")
+    page.wait_for_timeout(2800)
+    ok(page.locator("#pass-dock .pass").count() == 0 and page.is_hidden("#pass-dock"), "then it flies off into the passes tab")
+    ok(page.evaluate("window.__saved.length") == 1, "and the flight is saved")
+
+    print("boarding passes: stopping")
+    page.click("#btn-new"); page.fill("#inp-from", "paris"); page.fill("#inp-to", "rome"); fly_click(page); page.wait_for_timeout(500)
+    page.click("#btn-stop"); page.click("#btn-stop"); page.wait_for_timeout(700)
+    ok(page.locator("#pass-dock .pass").count() == 0, "a stopped flight leaves no pass")
+    ok(page.evaluate("window.__saved.length") == 1, "and nothing is saved")
+
+    print("passes tab")
+    page.click(".tab[data-view=passes]"); page.wait_for_timeout(700)
+    n = page.evaluate("lastHistory.length")
+    ok(page.locator("#hist-list .pass").count() == n, f"every flight is a boarding pass ({n})")
+    first = "#hist-list .pass >> nth=0"
+    ok(page.locator(first).locator(".pass-status").inner_text() == "landed", "newest first, marked landed")
+    newp = page.locator("#hist-list .pass[data-id='new1']")
+    ok(newp.locator(".pass-code").all_inner_texts() == ["LHR", "CDG"] and "cardiology" in newp.inner_text(), "a new flight's pass: LHR → CDG, cardiology")
+    ok("14 november 2026" in newp.inner_text() and "departs" in newp.inner_text() and "arrives" in newp.inner_text(), "with its date and departure/arrival times")
+    oldp = page.locator("#hist-list .pass[data-id='a1']")
+    ok("before modules" in oldp.inner_text() and "departs" not in oldp.inner_text() and "2 november 2026" in oldp.inner_text(), "an old flight's pass: 'before modules', no times")
+    total = page.evaluate("lastHistory.reduce((s, f) => s + (Number(f.km) || 0), 0)")
+    ok(page.inner_text("#hist-total") == f"{total:,} km", f"total: {page.inner_text('#hist-total')}")
+    page.click("[data-unit='mi']")
+    mi = f"{round(total * 0.621371):,} mi"
+    ok(page.inner_text("#hist-total") == mi and " mi" in newp.locator(".pass-field.dist dd").inner_text(), f"toggle to miles: {mi}, passes too")
+    page.reload(); page.wait_for_timeout(800); page.click(".tab[data-view=passes]"); page.wait_for_timeout(600)
+    ok(page.inner_text("#hist-total") == mi, "miles remembered after a refresh")
+    page.click("[data-unit='km']")
+    page.click("#hist-list .pass[data-id='new1']"); page.wait_for_timeout(3500)
+    off = page.evaluate("(() => { const a = ll2xyz(findCity('london').lat, findCity('london').lng), b = ll2xyz(findCity('paris').lat, findCity('paris').lng); const m = project(...slerp(a, b, 0.5)); return Math.hypot(m.sx - CX, m.sy - CY); })()")
+    ok(page.evaluate("viewRoute && viewRoute.id") == "new1" and off < 2, f"tapping a pass shows its route on the globe (centred, off {off:.1f}px)")
+    ok("selected" in page.get_attribute("#hist-list .pass[data-id='new1']", "class"), "and highlights the pass")
+    page.screenshot(path="/tmp/pass-5-list.png")
+    page.click("#hist-list .pass[data-id='new1']")
+    ok(page.evaluate("viewRoute") is None, "tapping it again lets go")
+    page.click("#hist-list .pass[data-id='new1'] .hist-del")
+    ok(page.evaluate("viewRoute") is None and page.evaluate("window.__deleted.length") == 0, "the ✕ doesn't select the pass, and only asks")
+    ok(not errs, "no console errors: " + str(errs))
+    ctx.close()
+
+    print("iphone: boarding pass")
+    ctx, page, errs = new_page(b, viewport={"width": 393, "height": 852}, device_scale_factor=3, is_mobile=True, has_touch=True)
+    page.goto(BASE); page.wait_for_timeout(1000)
+    page.evaluate("localStorage.clear(); chooseModule('akt')")
+    page.fill("#inp-from", "london"); page.fill("#inp-to", "tokyo"); fly_click(page); page.wait_for_timeout(2500)
+    db_, pt = page.evaluate("[document.getElementById('pass-dock').getBoundingClientRect().bottom, document.getElementById('panel').getBoundingClientRect().top]")
+    ok(page.is_visible("#pass-dock") and db_ <= pt, f"the pass prints just above the bottom panel ({db_:.0f} <= {pt:.0f})")
+    page.screenshot(path="/tmp/pass-6-iphone.png")
+    page.wait_for_timeout(7000)
+    ok(page.is_hidden("#pass-dock"), "then tucks away, leaving the globe clear")
     ok(not errs, "no console errors: " + str(errs))
     ctx.close()
 

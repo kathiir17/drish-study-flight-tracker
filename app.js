@@ -49,7 +49,21 @@ const CITIES = [
   {n:'ulaanbaatar',lat:47.91,lng:106.88,c:'mongolia'},{n:'krasnoyarsk',lat:56.01,lng:92.87,c:'russia'},
   {n:'perth',lat:-31.95,lng:115.86,c:'australia'},{n:'jaffna',lat:9.67,lng:80.02,c:'sri lanka'},
 ];
-CITIES.forEach(c => { c.scale = 1; }); // eased size, for the hover/press "bulge"
+// Each city's main airport code, for the boarding passes.
+const AIRPORTS = {
+  'london':'LHR', 'paris':'CDG', 'new york':'JFK', 'tokyo':'HND', 'sydney':'SYD', 'dubai':'DXB', 'singapore':'SIN',
+  'são paulo':'GRU', 'cairo':'CAI', 'mumbai':'BOM', 'los angeles':'LAX', 'nairobi':'NBO', 'moscow':'SVO', 'beijing':'PEK',
+  'cape town':'CPT', 'mexico city':'MEX', 'shanghai':'PVG', 'delhi':'DEL', 'istanbul':'IST', 'osaka':'KIX', 'karachi':'KHI',
+  'dhaka':'DAC', 'bangkok':'BKK', 'kolkata':'CCU', 'lagos':'LOS', 'kinshasa':'FIH', 'jakarta':'CGK', 'seoul':'ICN',
+  'taipei':'TPE', 'hong kong':'HKG', 'kuala lumpur':'KUL', 'manila':'MNL', 'bogotá':'BOG', 'lima':'LIM', 'santiago':'SCL',
+  'buenos aires':'EZE', 'johannesburg':'JNB', 'casablanca':'CMN', 'accra':'ACC', 'addis ababa':'ADD', 'riyadh':'RUH',
+  'tehran':'IKA', 'baghdad':'BGW', 'lahore':'LHE', 'chicago':'ORD', 'toronto':'YYZ', 'miami':'MIA', 'vancouver':'YVR',
+  'amsterdam':'AMS', 'berlin':'BER', 'madrid':'MAD', 'rome':'FCO', 'lisbon':'LIS', 'vienna':'VIE', 'warsaw':'WAW',
+  'stockholm':'ARN', 'auckland':'AKL', 'melbourne':'MEL', 'houston':'IAH', 'anchorage':'ANC', 'havana':'HAV',
+  'caracas':'CCS', 'la paz':'LPB', 'dakar':'DSS', 'almaty':'ALA', 'tashkent':'TAS', 'ulaanbaatar':'UBN',
+  'krasnoyarsk':'KJA', 'perth':'PER', 'jaffna':'JAF',
+};
+CITIES.forEach(c => { c.scale = 1; c.a = AIRPORTS[c.n]; }); // scale: eased size, for the hover/press "bulge"
 function findCity(name) { return CITIES.find(c => c.n === String(name).trim().toLowerCase()); }
 
 // ── Globe maths ───────────────────────────────────────────
@@ -222,7 +236,7 @@ function landRings(features) {
     fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json',
           { integrity: 'sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf' })
       .then(r => r.json())
-      .then(t => { geo = topojson.feature(t, t.objects.countries).features; LAND = landRings(geo); })
+      .then(t => { geo = topojson.feature(t, t.objects.countries).features; LAND = landRings(geo); makePassMap(geo); })
       .catch(e => console.error('country shapes failed to load', e));
   };
   document.head.appendChild(s);
@@ -408,6 +422,7 @@ function interacted() { cam.auto = null; cam.lastInteract = performance.now(); s
 const btnRecentre = document.getElementById('btn-recentre');
 let offFrame = false;
 function currentRoute() {
+  if (viewRoute && activeView === 'passes') return { from: viewRoute.from, to: viewRoute.to, prog: 0.5 };
   if (flight) return { from: flight.from, to: flight.to, prog: flightState(Date.now()).frac };
   if (sel.from && sel.to && sel.from !== sel.to) return { from: sel.from, to: sel.to, prog: 0 };
   return null;
@@ -839,6 +854,7 @@ function launch(s, restored) {
   chosenSpeed = flight.speed; showSpeed(chosenSpeed);
   persistFlight();
   if (!restored) playChime('takeoff');
+  showLivePass(!restored);   // takeoff: the boarding pass prints and tears; after a refresh it's just there
   frameRoute(flight.from, flight.to, flightState(now).frac);
   cam.lastInteract = performance.now();
   renderState();
@@ -868,11 +884,13 @@ function land() {
   pomo = null;
   persistFlight(); // clears the stored in-progress flight
   playChime('landing');
+  landLivePass();
   renderState();
   saveToHistory(flight, landT);
 }
 
 function stopFlight() {
+  if (flight && !flight.landed) dropLivePass();
   flight = null; pomo = null;
   persistFlight(); // clears the stored in-progress flight
   renderState();
@@ -1034,6 +1052,7 @@ function updatePlan() {
 // HUD numbers, refreshed every frame while in the air (cheap: text only changes when needed)
 function updateHud(now) {
   if (uiState() !== 'flying') return;
+  updateLivePass(now);
   const virt = Math.min(flight.totalMs, flightVirt(now));
   const st = flightState(now);                       // where the plane is: distance share, speed, phase
   setText($('fl-left'), clock(flight.totalMs - virt));
@@ -1371,6 +1390,8 @@ function showView(name) {
   });
   for (const v of ['fly', 'passes', 'map', 'stats']) $('view-' + v).hidden = v !== name;
   document.body.classList.toggle('on-fly', name === 'fly');
+  if (name !== 'passes') viewRoute = null;
+  updateDock();
   closeAC();
   if (name === 'passes') renderHistory();
   if (name === 'fly') { textCache.clear(); renderState(); tick(); }
@@ -1429,6 +1450,264 @@ async function deleteHistory(id) {
 // into HTML: every value goes in as plain text (textContent), and buttons are wired up
 // directly instead of pasting ids into code.
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; };
+const svgEl = (tag, attrs) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function anim(node, frames, ms, easing) {
+  const a = node.animate(frames, { duration: ms, easing: easing || 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' });
+  return a.finished.catch(() => {});
+}
+
+// ── Boarding passes ───────────────────────────────────────
+// Every flight has a pass, built from its record (nothing extra is stored). Seat and gate
+// look random but come from the flight's id, so a pass never changes between visits.
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+function hashStr(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function seatGate(id) {
+  const a = hashStr(id), b = hashStr(id + ':gate');
+  return { seat: `${1 + a % 38}${'ABCDEF'[(a >>> 8) % 6]}`, gate: `${'ABCDEFG'[b % 7]}${1 + (b >>> 5) % 40}` };
+}
+function cityCode(name) { const c = findCity(name); return c ? c.a : '???'; }
+function asDate(v) { if (!v) return null; const d = typeof v.toDate === 'function' ? v.toDate() : new Date(v); return isNaN(d) ? null : d; }
+function parseDDMMYYYY(s) { const m = /^(\d\d)\/(\d\d)\/(\d{4})$/.exec(String(s || '')); return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null; }
+function dateWords(d) { return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+function timeWords(d) { const h = d.getHours(); return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; }
+
+// km or miles, her choice (remembered on this device)
+const UNIT_KEY = 'distUnit';
+let distUnit = 'km';
+try { if (localStorage.getItem(UNIT_KEY) === 'mi') distUnit = 'mi'; } catch(e) {}
+const fmtDist = km => distUnit === 'mi' ? `${fmtNum(km * 0.621371)} mi` : `${fmtNum(km)} km`;
+
+// What a pass shows, from a saved flight or from the flight in the air.
+// A saved flight without flightMin is from before modules existed: it gets a pass,
+// but phase 4's stats leave it out.
+function passFromRecord(f) {
+  const start = asDate(f.startedAt), day = start || parseDDMMYYYY(f.date);
+  return { id: String(f.id), from: String(f.from), to: String(f.to), fromCode: cityCode(f.from), toCode: cityCode(f.to),
+           date: day ? dateWords(day) : String(f.date), dur: String(f.dur), km: Number(f.km) || 0,
+           module: f.module ? String(f.module) : null, legacy: f.flightMin == null,
+           departs: start, arrives: asDate(f.endedAt), status: 'landed', ...seatGate(f.id) };
+}
+function passFromFlight(fl) {
+  return { id: fl.id, from: fl.from.n, to: fl.to.n, fromCode: fl.from.a, toCode: fl.to.a,
+           date: dateWords(new Date(fl.startT)), dur: formatDur(fl.totalMs / 3600000), km: Math.round(fl.km),
+           module: fl.module, legacy: false, departs: new Date(fl.startT), arrives: null,
+           status: fl.paused ? 'holding' : 'boarding', ...seatGate(fl.id) };
+}
+
+function planeIcon() {
+  const s = svgEl('svg', { viewBox: '0 0 24 24', class: 'pass-plane', 'aria-hidden': 'true' });
+  s.append(svgEl('path', { d: 'M21 15.5v-1.8l-8-5V3.5a1.5 1.5 0 0 0-3 0v5.2l-8 5v1.8l8-2.5v5.4l-2 1.5V21l3.5-1 3.5 1v-1.6l-2-1.5V13z' }));
+  return s;
+}
+function barcode(id) {   // decorative, but always the same for a given flight
+  const s = svgEl('svg', { viewBox: '0 0 200 44', preserveAspectRatio: 'none', class: 'pass-barcode', 'aria-hidden': 'true' });
+  let x = 0, h = hashStr(id);
+  while (x < 200) {
+    h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+    const w = 1 + (h % 3), gap = 1 + ((h >>> 4) % 3);
+    s.append(svgEl('rect', { x, y: 0, width: w, height: 44 }));
+    x += w + gap;
+  }
+  return s;
+}
+function setPassStatus(pass, status) {
+  const chip = pass.querySelector('.pass-status');
+  chip.textContent = status;
+  chip.dataset.status = status;
+}
+
+// kind: 'live' (the flight in the air, with its stub) or 'list' (the passes tab)
+function buildPass(p, kind) {
+  const pass = el('article', 'pass ' + kind);
+  pass.dataset.id = p.id;
+  pass.setAttribute('aria-label', `boarding pass, ${p.from} to ${p.to}, ${p.date}`);
+  const main = el('div', 'pass-main');
+  const top = el('div', 'pass-top');
+  top.append(el('span', 'pass-date pf', p.date), el('span', 'pass-status'));
+  const end = (code, city, side) => {
+    const e = el('div', 'pass-end ' + side);
+    e.append(el('b', 'pass-code pf', code), el('span', 'pass-city pf', city));
+    return e;
+  };
+  const mid = el('div', 'pass-mid');
+  const track = el('div', 'pass-track');
+  track.append(planeIcon());
+  mid.append(track, el('span', 'pass-dur pf', p.dur));
+  const route = el('div', 'pass-route');
+  route.append(end(p.fromCode, p.from, 'from'), mid, end(p.toCode, p.to, 'to'));
+  const fields = el('dl', 'pass-fields');
+  const field = (label, value, cls) => {
+    const d = el('div', 'pass-field pf' + (cls ? ' ' + cls : ''));
+    d.append(el('dt', null, label), el('dd', null, value));
+    return d;
+  };
+  fields.append(field('seat', p.seat, 'mono'), field('gate', p.gate, 'mono'), field('distance', fmtDist(p.km), 'dist'));
+  if (p.departs) fields.append(field('departs', timeWords(p.departs)));
+  if (p.arrives) fields.append(field('arrives', timeWords(p.arrives)));
+  fields.append(field('module', p.module || (p.legacy ? 'before modules' : 'uncategorised'), 'wide' + (p.module ? '' : ' muted')));
+  main.append(top, route, fields);
+  pass.append(main);
+  setPassStatus(pass, p.status);
+  if (kind === 'live') {
+    const perf = el('div', 'pass-perf');
+    const stub = el('div', 'pass-stub');
+    stub.append(barcode(p.id), el('span', 'pass-stub-code', `${p.fromCode} ${p.toCode} ${p.seat}`));
+    pass.append(perf, stub);
+  }
+  return pass;
+}
+
+// ── The pass in the air ──
+// Takeoff: the pass slides in below the sidebar, fills itself in, the tear line draws,
+// the stub tears off and falls away, and the pass stays docked for the flight.
+// Landing: a "landed" stamp, then it flies into the passes tab.
+const dock = $('pass-dock');
+let livePass = null, passRun = 0;
+function placeDock() {
+  if (!livePass) return;
+  const pr = panelEl.getBoundingClientRect(), s = dock.style;
+  s.width = pr.width + 'px'; s.left = pr.left + 'px';
+  if (panelDocked()) { s.top = 'auto'; s.bottom = (H - pr.top + 10) + 'px'; }
+  else { s.bottom = 'auto'; s.top = (pr.bottom + 12) + 'px'; }
+}
+function updateDock() {
+  // on a phone the pass only shows while it's animating (the flight card has the details)
+  dock.hidden = !livePass || activeView !== 'fly' || (panelDocked() && !livePass.classList.contains('animating'));
+  placeDock();
+}
+if (window.ResizeObserver) new ResizeObserver(placeDock).observe(panelEl);
+window.addEventListener('resize', updateDock);
+
+function scramble(node) {   // airport codes flick through letters before settling, like a departures board
+  const final = node.textContent, L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let n = 0;
+  const t = setInterval(() => {
+    n++;
+    node.textContent = n >= 7 ? final : final.split('').map((c, i) => n > 3 + i ? c : L[(Math.random() * 26) | 0]).join('');
+    if (n >= 7) clearInterval(t);
+  }, 45);
+}
+function showStatic(pass) {   // finished state, no animation (refresh mid-flight, reduced motion)
+  pass.querySelector('.pass-perf')?.remove();
+  pass.querySelector('.pass-stub')?.remove();
+  pass.classList.add('torn');
+}
+async function showLivePass(animate) {
+  const run = ++passRun;
+  livePass = buildPass(passFromFlight(flight), 'live');
+  const pass = livePass;
+  dock.replaceChildren(pass);
+  const alive = () => run === passRun && livePass === pass;
+  if (!animate || reduceMotion.matches) { showStatic(pass); setPassStatus(pass, flight.paused ? 'holding' : 'in flight'); updateDock(); return; }
+  pass.classList.add('animating', 'printing');
+  updateDock();
+  await anim(pass, [{ opacity: 0, transform: 'translateY(16px) scale(.97)' }, { opacity: 1, transform: 'none' }], 420);
+  for (const f of pass.querySelectorAll('.pf')) {          // fill in, field by field (.pf = a pass field)
+    if (!alive()) return;
+    f.classList.add('in');
+    if (f.classList.contains('pass-code')) scramble(f);
+    await sleep(f.classList.contains('pass-code') ? 260 : 110);
+  }
+  if (!alive()) return;
+  const bars = pass.querySelector('.pass-barcode'), perf = pass.querySelector('.pass-perf'), stub = pass.querySelector('.pass-stub');
+  await anim(bars, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], 450, 'cubic-bezier(.4,0,.2,1)');
+  if (!alive()) return;
+  await anim(perf, [{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], 420, 'cubic-bezier(.4,0,.2,1)');
+  await sleep(380);
+  if (!alive()) return;
+  pass.classList.add('torn');                                 // the zigzag edges appear
+  perf.remove();
+  await anim(stub, [{ transform: 'none', opacity: 1 },
+                    { transform: 'translate(10px, 6px) rotate(3deg)', opacity: 1, offset: .25 },
+                    { transform: 'translate(46px, 70px) rotate(12deg)', opacity: 0 }], 900, 'cubic-bezier(.4,0,.7,.2)');
+  if (!alive()) return;
+  stub.remove();
+  pass.classList.remove('printing');
+  setPassStatus(pass, flight && flight.paused ? 'holding' : 'in flight');
+  if (panelDocked()) { await sleep(1200); if (alive()) await anim(pass, [{ opacity: 1 }, { opacity: 0 }], 350); }
+  if (alive()) { pass.classList.remove('animating'); pass.getAnimations().forEach(a => a.cancel()); updateDock(); }
+}
+function updateLivePass(now) {   // the little plane on the pass follows the real one
+  if (!livePass || !flight) return;
+  livePass.style.setProperty('--p', flightState(now).frac.toFixed(4));
+  if (!livePass.classList.contains('printing')) {
+    const st = flight.landed ? 'landed' : flight.paused ? 'holding' : 'in flight';
+    if (livePass.querySelector('.pass-status').dataset.status !== st) setPassStatus(livePass, st);
+  }
+}
+async function landLivePass() {
+  const pass = livePass;
+  if (!pass) return;
+  const run = ++passRun;
+  const alive = () => run === passRun && livePass === pass;
+  showStatic(pass); pass.classList.remove('printing');
+  pass.getAnimations().forEach(a => a.cancel());
+  setPassStatus(pass, 'landed');
+  if (activeView !== 'fly' || reduceMotion.matches) { clearLivePass(); return; }
+  pass.classList.add('animating'); updateDock();
+  const stamp = el('div', 'pass-stamp', 'landed');
+  pass.querySelector('.pass-main').append(stamp);
+  await anim(stamp, [{ opacity: 0, transform: 'rotate(-12deg) scale(2.6)' }, { opacity: 1, transform: 'rotate(-12deg) scale(1)' }], 300, 'cubic-bezier(.3,1.5,.6,1)');
+  anim(pass, [{ transform: 'none' }, { transform: 'translateY(3px)' }, { transform: 'none' }], 220, 'ease-out');
+  await sleep(1300);
+  if (!alive()) return;
+  const tab = document.querySelector('.tab[data-view="passes"]');
+  const a = pass.getBoundingClientRect(), b = tab.getBoundingClientRect();
+  const dx = (b.left + b.width / 2) - (a.left + a.width / 2), dy = (b.top + b.height / 2) - (a.top + a.height / 2);
+  await anim(pass, [{ transform: 'none', opacity: 1 }, { transform: `translate(${dx}px, ${dy}px) scale(.08)`, opacity: .25 }], 800, 'cubic-bezier(.55,0,.75,.2)');
+  if (!alive()) return;
+  anim(tab, [{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }], 380, 'ease-out');
+  clearLivePass();
+}
+async function dropLivePass() {   // a stopped flight leaves no pass: it just fades away
+  const pass = livePass;
+  if (!pass) return;
+  passRun++;
+  await anim(pass, [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(8px)' }], 300);
+  if (livePass === pass) clearLivePass();
+}
+function clearLivePass() {
+  passRun++;
+  livePass = null;
+  dock.replaceChildren();
+  updateDock();
+}
+
+// A faint dotted world map for the passes, drawn once from the country shapes.
+function makePassMap(features) {
+  try {
+    const W0 = 180, H0 = 90, src = document.createElement('canvas');
+    src.width = W0; src.height = H0;
+    const g = src.getContext('2d');
+    g.fillStyle = '#000';
+    for (const f of features) {
+      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+      for (const poly of polys) {
+        const ring = poly[0];
+        if (ring.some(([, lat]) => lat < -60)) continue;                               // leave out antarctica
+        if (ring.some(([lng], i) => i && Math.abs(lng - ring[i - 1][0]) > 180)) continue; // and shapes split by the date line
+        g.beginPath();
+        ring.forEach(([lng, lat], i) => { const x = (lng + 180) / 360 * W0, y = (90 - lat) / 180 * H0; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+        g.fill();
+      }
+    }
+    const px = g.getImageData(0, 0, W0, H0).data, step = 2, out = document.createElement('canvas');
+    out.width = W0 * 4; out.height = (H0 - 30) * 4;            // crop the far south
+    const o = out.getContext('2d');
+    o.fillStyle = '#15233f';
+    for (let y = 0; y < H0 - 30; y += step) for (let x = 0; x < W0; x += step) {
+      if (px[(y * W0 + x) * 4 + 3] > 80) { o.beginPath(); o.arc(x * 4 + 2, y * 4 + 2, 1.6, 0, Math.PI * 2); o.fill(); }
+    }
+    document.documentElement.style.setProperty('--pass-map', `url("${out.toDataURL('image/png')}")`);
+  } catch(e) { console.error('pass map', e); }
+}
+
+// ── Passes tab ──
+// Every landed flight as a boarding pass, newest first, with the total distance (km or
+// miles). Tapping a pass shows its route on the globe; deleting needs two taps.
+let viewRoute = null;   // { from, to, id } the route of the pass she tapped
+let lastHistory = [];
 async function renderHistory() {
   const list = $('hist-list'), count = $('hist-count');
   let h;
@@ -1440,28 +1719,61 @@ async function renderHistory() {
     list.replaceChildren(el('p', 'hist-empty', 'couldn’t load your flights. check your connection and open this tab again.'));
     return;
   }
+  lastHistory = h;
   count.textContent = h.length ? `${h.length} flight${h.length === 1 ? '' : 's'}` : '';
+  const totalKm = h.reduce((s, f) => s + (Number(f.km) || 0), 0);
+  $('hist-total').textContent = fmtDist(totalKm);
+  $('hist-totals').hidden = !h.length;
+  document.querySelectorAll('[data-unit]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === distUnit)));
   if (!h.length) {
     list.replaceChildren(el('p', 'hist-empty', 'no flights yet. your first landing will appear here.'));
     return;
   }
   list.replaceChildren(...h.map(f => {
-    const route = el('div', 'hist-route');
-    route.append(String(f.from), el('span', 'arrow', '→'), String(f.to));
-    const detail = el('div', 'hist-detail', `${f.module ? f.module + ', ' : ''}${f.date}, ${fmtNum(f.km)} km, ${f.dur}${f.realDur ? ` (${f.realDur} real)` : ''}`);
-    const main = el('div', 'hist-main'); main.append(route, detail);
+    const pass = buildPass(passFromRecord(f), 'list');
+    pass.tabIndex = 0; pass.setAttribute('role', 'button');
+    pass.classList.toggle('selected', !!viewRoute && viewRoute.id === String(f.id));
+    const show = () => showPassRoute(f, pass);
+    pass.addEventListener('click', show);
+    pass.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(); } });
     const del = el('button', 'hist-del', '✕');
     del.type = 'button'; del.setAttribute('aria-label', `delete ${f.from} to ${f.to}`);
     let armT = null;
-    del.addEventListener('click', () => {
-      if (del.classList.contains('armed')) { clearTimeout(armT); del.disabled = true; deleteHistory(f.id); return; }
+    del.addEventListener('click', e => {
+      e.stopPropagation();
+      if (del.classList.contains('armed')) {
+        clearTimeout(armT); del.disabled = true;
+        if (viewRoute && viewRoute.id === String(f.id)) viewRoute = null;
+        deleteHistory(f.id); return;
+      }
       del.classList.add('armed'); del.textContent = 'delete?';
       armT = setTimeout(() => { del.classList.remove('armed'); del.textContent = '✕'; }, 3500);
     });
-    const row = el('div', 'hist-row'); row.append(main, del);
-    return row;
+    pass.querySelector('.pass-top').append(del);
+    return pass;
   }));
 }
+function showPassRoute(f, pass) {
+  const from = findCity(f.from), to = findCity(f.to);
+  if (!from || !to || from === to) return;
+  if (viewRoute && viewRoute.id === String(f.id)) { viewRoute = null; pass.classList.remove('selected'); return; }
+  viewRoute = { from, to, id: String(f.id) };
+  document.querySelectorAll('#hist-list .pass.selected').forEach(p => p.classList.remove('selected'));
+  pass.classList.add('selected');
+  frameRoute(from, to, 0.5);
+}
+document.querySelectorAll('[data-unit]').forEach(b => b.addEventListener('click', () => {
+  distUnit = b.dataset.unit;
+  try { localStorage.setItem(UNIT_KEY, distUnit); } catch(e) {}
+  if (lastHistory.length) {   // re-render from what's already loaded
+    $('hist-total').textContent = fmtDist(lastHistory.reduce((s, f) => s + (Number(f.km) || 0), 0));
+    document.querySelectorAll('#hist-list .pass').forEach(p => {
+      const f = lastHistory.find(x => String(x.id) === p.dataset.id);
+      if (f) p.querySelector('.pass-field.dist dd').textContent = fmtDist(Number(f.km) || 0);
+    });
+  }
+  document.querySelectorAll('[data-unit]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.unit === distUnit)));
+}));
 
 // ── Start-up ──────────────────────────────────────────────
 let lastFrame = 0, frameDt = 1 / 60;
@@ -1475,7 +1787,8 @@ function loop(t) {
   drawStars(t || 0);
   drawGlobe();
   const now = Date.now();
-  if (flight) drawRoute(flight.from, flight.to, flightState(now).frac, !flight.landed, flight.paused, t);
+  if (viewRoute && activeView === 'passes') drawRoute(viewRoute.from, viewRoute.to, 1, false);
+  else if (flight) drawRoute(flight.from, flight.to, flightState(now).frac, !flight.landed, flight.paused, t);
   else if (sel.from && sel.to && sel.from !== sel.to) drawRoute(sel.from, sel.to, 0, false);
   drawCities();
   updateHud(now);

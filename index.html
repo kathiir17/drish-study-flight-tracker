@@ -152,9 +152,17 @@
   <!-- ── passes ──────────────────────────────────────── -->
   <section id="view-passes" class="view" aria-label="passes" hidden>
     <header class="sheet-head">
-      <h2>your flights</h2>
+      <h2>your passes</h2>
       <span id="hist-count" class="sheet-count"></span>
     </header>
+    <div id="hist-totals" class="hist-totals" hidden>
+      <span class="hist-total-label">flown so far</span>
+      <span id="hist-total" class="hist-total"></span>
+      <div class="segmented unit" role="group" aria-label="distance unit">
+        <button type="button" data-unit="km" aria-pressed="true">km</button>
+        <button type="button" data-unit="mi" aria-pressed="false">mi</button>
+      </div>
+    </div>
     <div id="hist-list" class="hist-list"></div>
   </section>
 
@@ -176,6 +184,9 @@
   </div>
 </aside>
 
+
+<!-- the boarding pass for the flight in the air: docked below the sidebar; app.js places it -->
+<div id="pass-dock" class="pass-dock" hidden></div>
 
 <!-- module picker: opens below the sidebar (above the panel on a phone); app.js places it -->
 <div id="module-menu" class="module-menu" role="dialog" aria-label="choose a module" hidden>

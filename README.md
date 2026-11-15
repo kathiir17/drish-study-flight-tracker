@@ -41,8 +41,13 @@ pick two cities, press fly, and study for as long as the flight takes.
 - **landing:** a summary card, with "fly onward" to start the next leg from there.
 - **chimes:** takeoff, halfway, landing, break and back-to-focus. sound starts working
   after the first tap or key press (a browser rule).
-- **passes:** every landed flight, newest first, with date, distance, flight time and
-  real time if it was sped up. deleting one needs two taps.
+- **boarding passes:** at takeoff a pass prints itself below the sidebar (airport codes,
+  date, duration, seat, gate, module), the tear line draws and the stub tears off; the pass
+  stays docked through the flight, gets a "landed" stamp on arrival and flies into the
+  passes tab. seat and gate are random-looking but fixed for each flight.
+- **passes tab:** every flight as a boarding pass, newest first, with the total distance
+  flown (km or miles toggle). tapping a pass shows its route on the globe. deleting one
+  needs two taps. flights from before modules existed say "before modules".
 - **speed:** 1x–10000x, chosen before takeoff or changed mid-flight without the
   progress jumping. sped-up flights record the real time spent too.
 - **as an app:** in safari, share → add to home screen (iphone/ipad) or file → add to
