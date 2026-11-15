@@ -168,10 +168,41 @@
 
   <!-- ── map ─────────────────────────────────────────── -->
   <section id="view-map" class="view" aria-label="map" hidden>
-    <div class="soon">
+    <header class="sheet-head">
       <h2>your flight map</h2>
-      <p>every route you've flown, drawn across the globe. it's being built now, and your finished flights will all be on it.</p>
+    </header>
+    <p id="map-summary" class="map-summary" aria-live="polite"></p>
+
+    <div class="map-filter">
+      <span class="map-label">landed in</span>
+      <div id="map-conts" class="chips" role="group" aria-label="destination continent"></div>
     </div>
+
+    <div class="map-filter">
+      <label class="map-label" for="map-module">module</label>
+      <select id="map-module" class="map-select"></select>
+    </div>
+
+    <div class="map-filter">
+      <div class="map-label-row"><span class="map-label">dates</span><button type="button" id="map-dates" class="map-dates" aria-expanded="false" aria-controls="map-custom" title="choose exact dates"></button></div>
+      <div id="map-custom" class="map-custom" hidden>
+        <label>from <input type="date" id="map-from"></label>
+        <label>to <input type="date" id="map-to"></label>
+      </div>
+      <div class="range2">
+        <div class="range2-track"><div id="map-range-fill" class="range2-fill"></div></div>
+        <input type="range" id="map-d0" step="1" aria-label="from date">
+        <input type="range" id="map-d1" step="1" aria-label="to date">
+      </div>
+      <div class="segmented presets" id="map-presets">
+        <button type="button" data-preset="7">week</button>
+        <button type="button" data-preset="30">month</button>
+        <button type="button" data-preset="all">all</button>
+      </div>
+    </div>
+
+    <div id="map-detail" class="map-detail" hidden></div>
+    <p id="map-hint" class="map-hint">tap a route or a city for details</p>
   </section>
 
   <!-- ── stats ───────────────────────────────────────── -->

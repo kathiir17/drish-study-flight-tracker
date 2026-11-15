@@ -85,6 +85,11 @@ The filename must stay `index.html` for Pages to serve it.
   tab. A stopped flight's pass fades. Pass field elements use class `.pf` (NOT `.fill`,
   which is the progress bar). Passes tab: every flight as a pass, total in km or miles
   (`distUnit`, per device), tapping a pass shows its route (`viewRoute`).
+- Map tab (app.js "Flight map tab"): `mapState` holds the filters and the grouped
+  `routes`/`cities`; `drawMap()` replaces the route + city drawing while it's open, and taps
+  go to `mapTap`/`mapHit` instead of `onCityTap`. Colour = destination continent (`c.ct`,
+  from `CONTINENTS`, every city has one). "Visited" = landed in. Dates come from the
+  `date` field (all flights have it). No recentre button or drift-back on this tab.
 - Old flights: no `flightMin` = saved before phase 0 → pass says "before modules", and
   phase 4 stats leave them out. Newer flights with no `module` count as uncategorised.
 - Modules: her list is `MODULE_GROUPS` in app.js (year 4/5 modules a–c, year 6, cpp, exam prep);

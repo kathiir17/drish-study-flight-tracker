@@ -12,7 +12,7 @@ const flights = [
 ];
 window.__saved = []; window.__deleted = [];
 window.DB = {
-  loadFlights: async () => [...flights],
+  loadFlights: async () => [...flights, ...(window.__extra || [])],
   addFlight: async f => { window.__saved.push(f); return f.id; },
   deleteFlight: async id => { window.__deleted.push(id); const i = flights.findIndex(f=>f.id===id); if (i>=0) flights.splice(i,1); },
   loadModules: async () => [...(window.__modules || ['anatomy revision'])],
@@ -572,6 +572,73 @@ with sync_playwright() as p:
     fly_w = page.evaluate("document.getElementById('panel').getBoundingClientRect().width")
     ok(fly_w < plan_w - 20, f"panel slims down in flight ({plan_w:.0f} -> {fly_w:.0f}px)")
     ok(page.evaluate("CX") < cx_plan - 10, f"and the globe moves into the space ({cx_plan:.0f} -> {page.evaluate('CX'):.0f})")
+    ok(not errs, "no console errors: " + str(errs))
+    ctx.close()
+
+    print("flight map")
+    ctx, page, errs = new_page(b, viewport={"width": 1440, "height": 900})
+    page.add_init_script("""window.__extra = [
+      {id:'e1', seq:4, from:'london', to:'paris', km:343, dur:'42m 01s', realDur:null, date:'10/11/2026', flightMin:42, realMin:40, module:'cardiology'},
+      {id:'e2', seq:5, from:'london', to:'tokyo', km:9558, dur:'11h 33m', realDur:null, date:'13/11/2026', flightMin:693, realMin:690, module:'anatomy'},
+      {id:'e3', seq:6, from:'new york', to:'sydney', km:15990, dur:'18h 50m', realDur:null, date:'12/11/2026', flightMin:1130, realMin:900},
+    ];""")
+    page.goto(BASE); page.wait_for_timeout(1200)
+    ok(page.evaluate("CITIES.every(c => c.ct && c.ct.color)"), "every city has a continent")
+    page.click(".tab[data-view=map]"); page.wait_for_timeout(2500)
+    summ = page.inner_text("#map-summary")
+    ok(summ.startswith("5 flights") and "4 countries" in summ, "summary counts the drawable flights and countries landed in: " + summ)
+    ok(page.evaluate("mapState.routes.length") == 4 and page.evaluate("mapState.routes.find(r => r.key === 'london>paris').n") == 2,
+       "the same route flown twice is one arc, counted twice")
+    ok(page.evaluate("mapState.cities.get('london').landed") == 0 and page.evaluate("mapState.cities.get('paris').landed") == 2,
+       "a city only counts as visited once she's landed there")
+    chips = page.evaluate("[...document.querySelectorAll('#map-conts .chip')].map(b => b.textContent + ':' + (b.disabled ? 'off' : 'on'))")
+    ok(chips == ['all:on', 'europe:on', 'asia:on', 'africa:off', 'n. america:off', 's. america:off', 'oceania:on'], "continent chips: only ones she's landed in can be picked " + str(chips))
+    page.click("#map-conts .chip:has-text('europe')")
+    ok(page.inner_text("#map-summary").startswith("2 flights") and page.evaluate("mapState.routes.length") == 1, "continent filter: europe only")
+    page.click("#map-conts .chip:has-text('all')")
+    opts = page.evaluate("[...document.querySelectorAll('#map-module option')].map(o => o.textContent)")
+    ok(opts == ['all modules', 'anatomy', 'cardiology', 'uncategorised'], "module filter lists her modules " + str(opts))
+    page.select_option("#map-module", label="cardiology")
+    ok(page.inner_text("#map-summary").startswith("2 flights"), "module filter: cardiology")
+    page.select_option("#map-module", label="uncategorised")
+    ok(page.inner_text("#map-summary").startswith("1 flight "), "uncategorised leaves out flights from before modules")
+    page.select_option("#map-module", label="all modules")
+    page.evaluate("const i = document.getElementById('map-d0'); i.value = dayNum(new Date(2026, 10, 11)); i.dispatchEvent(new Event('input'))")
+    ok(page.inner_text("#map-summary").startswith("3 flights") and "11 nov" in page.inner_text("#map-dates"), "date slider: from 11 nov on " + page.inner_text("#map-dates"))
+    page.click("#map-dates")
+    ok(page.is_visible("#map-from") and page.is_visible("#map-to"), "tapping the dates opens exact date pickers")
+    ok(page.input_value("#map-from") == "2026-11-11", "they show the slider's range " + page.input_value("#map-from"))
+    page.fill("#map-to", "2026-11-13"); page.dispatch_event("#map-to", "change")
+    ok(page.inner_text("#map-summary").startswith("2 flights") and page.inner_text("#map-dates") == "11 nov – 13 nov", "custom range 11–13 nov: " + page.inner_text("#map-summary"))
+    ok(page.evaluate("mapState.d1") == page.evaluate("dayNum(new Date(2026, 10, 13))") and page.evaluate("+document.getElementById('map-d1').value") == page.evaluate("mapState.d1"), "the slider follows the typed dates")
+    page.fill("#map-from", "2026-11-20"); page.dispatch_event("#map-from", "change")
+    ok(page.inner_text("#map-dates") == "13 nov", "a from-date after the to-date is held at the to-date")
+    page.screenshot(path="/tmp/map-custom.png")
+    page.click("#map-dates")
+    ok(page.is_hidden("#map-custom"), "tapping the dates again closes the pickers")
+    page.click("[data-preset=all]")
+    ok(page.inner_text("#map-summary").startswith("5 flights"), "the 'all' preset brings everything back, old flights included")
+    page.screenshot(path="/tmp/map-all.png")
+
+    page.evaluate("cam.auto = viewCentredOn(ll2xyz(48.86, 2.35), 3)"); page.wait_for_timeout(2500)
+    x, y, _ = city_xy(page, "paris"); page.mouse.click(x, y); page.wait_for_timeout(300)
+    det = page.inner_text("#map-detail") if page.is_visible("#map-detail") else ""
+    ok("paris" in det and "2 times" in det and "france" in det, "tapping a city shows its details: " + det.replace("\n", " | "))
+    page.screenshot(path="/tmp/map-city.png")
+    page.mouse.click(x, y); page.wait_for_timeout(200)
+    ok(page.is_hidden("#map-detail"), "tapping it again closes them")
+    page.evaluate("cam.auto = viewCentredOn(slerp(ll2xyz(51.51,-0.13), ll2xyz(35.69,139.69), 0.5), 1)"); page.wait_for_timeout(2500)
+    mx, my = page.evaluate("(() => { const p = project(...slerp(ll2xyz(51.51,-0.13), ll2xyz(35.69,139.69), 0.5)); return [p.sx, p.sy]; })()")
+    page.mouse.click(mx, my + 3); page.wait_for_timeout(300)
+    det = page.inner_text("#map-detail") if page.is_visible("#map-detail") else ""
+    ok("london" in det and "tokyo" in det and "flight" in det and "11 h 30 min" in det, "tapping a route shows its details: " + det.replace("\n", " | "))
+    page.screenshot(path="/tmp/map-route.png")
+    page.mouse.click(1400, 60); page.wait_for_timeout(200)
+    ok(page.is_hidden("#map-detail"), "tapping empty space closes them")
+    ok(page.evaluate("window.__xss") is None, "junk from the database isn't drawn or run")
+    ok(page.is_hidden("#btn-recentre"), "no recentre button on the map")
+    page.click(".tab[data-view=fly]"); page.wait_for_timeout(300)
+    ok(page.locator("#view-fly").is_visible(), "back to the fly tab")
     ok(not errs, "no console errors: " + str(errs))
     ctx.close()
 

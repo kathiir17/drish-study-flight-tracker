@@ -128,8 +128,16 @@ with no module count as uncategorised.
 
 ## phase 4 — data views
 
-- **flight map tab:** every completed route on the globe, filterable by continent and
-  short- vs long-haul.
+split into 4a (map) and 4b (stats), pushed separately.
+
+- **4a flight map tab (built):** every landed route on the globe, coloured by destination
+  continent; repeat routes merge into one thicker, brighter arc; landed-in cities get a dot
+  sized by landings, departure-only cities a ring. filters: destination continent, module
+  (incl. uncategorised; pre-module flights only under "all"), date range slider with
+  week/month/all and exact from/to pickers (tap the dates) (every flight has `date`, so old ones count). summary line (flights ·
+  distance · countries landed in). tap a route or city for a details card. agreed rule:
+  she has only "been" somewhere if she landed there. later ideas: replay timelapse (#4);
+  colour-by switch (#5, low priority); short/long-haul filter not wanted for now.
 - **stats and achievements** (poker-app style awards): time per module, total distance,
   longest flight, streaks, countries/continents visited, milestone badges. completed
   flights only.

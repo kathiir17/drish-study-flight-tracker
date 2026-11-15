@@ -11,7 +11,7 @@ pick two cities, press fly, and study for as long as the flight takes.
 
 - **the screen:** a 3d globe under a night sky, with a floating sidebar (like apple
   maps) holding the tabs: **fly**, **passes** (her flight history), **map** and **stats**
-  (both coming soon). the globe always stays in view beside it. on a phone the panel
+  (coming soon). the globe always stays in view beside it. on a phone the panel
   docks at the bottom instead.
 - **choosing a route:** tap a city on the globe for the departure, tap another for the
   destination, or type them (autocomplete, with arrow keys and enter). the card shows
@@ -48,6 +48,13 @@ pick two cities, press fly, and study for as long as the flight takes.
 - **passes tab:** every flight as a boarding pass, newest first, with the total distance
   flown (km or miles toggle). tapping a pass shows its route on the globe. deleting one
   needs two taps. flights from before modules existed say "before modules".
+- **map tab:** every landed flight drawn on the globe, coloured by the continent it
+  landed in. a route flown more than once is one arc that gets thicker and brighter;
+  cities she's landed in get a dot that grows with each landing (a place she's only
+  flown from is a small ring, since "been to" means landed in). filters: destination
+  continent, module, and a date range slider (week / month / all, or tap the dates for
+  exact from/to pickers), which covers every flight ever saved. a summary line counts flights, distance and countries. tapping a
+  route or a city shows how many flights, time studied and when it was last flown.
 - **speed:** 1x–10000x, chosen before takeoff or changed mid-flight without the
   progress jumping. sped-up flights record the real time spent too.
 - **as an app:** in safari, share → add to home screen (iphone/ipad) or file → add to

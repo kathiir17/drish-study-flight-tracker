@@ -63,7 +63,24 @@ const AIRPORTS = {
   'caracas':'CCS', 'la paz':'LPB', 'dakar':'DSS', 'almaty':'ALA', 'tashkent':'TAS', 'ulaanbaatar':'UBN',
   'krasnoyarsk':'KJA', 'perth':'PER', 'jaffna':'JAF',
 };
-CITIES.forEach(c => { c.scale = 1; c.a = AIRPORTS[c.n]; }); // scale: eased size, for the hover/press "bulge"
+// Each city's continent, for the flight map's colours and filter (and stats later).
+const CONTINENTS = [
+  { id: 'europe', label: 'europe', color: '#8cc4ff', cities: ['london', 'paris', 'moscow', 'istanbul', 'amsterdam', 'berlin',
+    'madrid', 'rome', 'lisbon', 'vienna', 'warsaw', 'stockholm'] },
+  { id: 'asia', label: 'asia', color: '#ffbd5a', cities: ['tokyo', 'dubai', 'singapore', 'mumbai', 'beijing', 'shanghai', 'delhi',
+    'osaka', 'karachi', 'dhaka', 'bangkok', 'kolkata', 'jakarta', 'seoul', 'taipei', 'hong kong', 'kuala lumpur', 'manila',
+    'riyadh', 'tehran', 'baghdad', 'lahore', 'almaty', 'tashkent', 'ulaanbaatar', 'krasnoyarsk', 'jaffna'] },
+  { id: 'africa', label: 'africa', color: '#ff8f87', cities: ['cairo', 'nairobi', 'cape town', 'lagos', 'kinshasa', 'johannesburg',
+    'casablanca', 'accra', 'addis ababa', 'dakar'] },
+  { id: 'north america', label: 'n. america', color: '#c3a6ff', cities: ['new york', 'los angeles', 'mexico city', 'chicago',
+    'toronto', 'miami', 'vancouver', 'houston', 'anchorage', 'havana'] },
+  { id: 'south america', label: 's. america', color: '#74e0a6', cities: ['são paulo', 'bogotá', 'lima', 'santiago', 'buenos aires',
+    'caracas', 'la paz'] },
+  { id: 'oceania', label: 'oceania', color: '#5fd8e6', cities: ['sydney', 'auckland', 'melbourne', 'perth'] },
+];
+const CONTINENT_OF = {};
+CONTINENTS.forEach(k => k.cities.forEach(n => { CONTINENT_OF[n] = k; }));
+CITIES.forEach(c => { c.scale = 1; c.a = AIRPORTS[c.n]; c.ct = CONTINENT_OF[c.n]; }); // scale: eased size, for the hover/press "bulge"
 function findCity(name) { return CITIES.find(c => c.n === String(name).trim().toLowerCase()); }
 
 // ── Globe maths ───────────────────────────────────────────
@@ -422,6 +439,7 @@ function interacted() { cam.auto = null; cam.lastInteract = performance.now(); s
 const btnRecentre = document.getElementById('btn-recentre');
 let offFrame = false;
 function currentRoute() {
+  if (activeView === 'map') return null;   // the map tab shows every route, not one
   if (viewRoute && activeView === 'passes') return { from: viewRoute.from, to: viewRoute.to, prog: 0.5 };
   if (flight) return { from: flight.from, to: flight.to, prog: flightState(Date.now()).frac };
   if (sel.from && sel.to && sel.from !== sel.to) return { from: sel.from, to: sel.to, prog: 0 };
@@ -531,7 +549,7 @@ function updateCamera(dt) {   // dt in seconds
     } else if (zoom !== cam.tZoom) { setZoom(cam.tZoom); holdAnchor(); cam.anchor = null; }
   }
   // in flight and left alone: drift back to the route
-  if (flight && !flight.landed && !dragging && !pinch && !cam.auto && now - cam.lastInteract > FOLLOW_AFTER_MS
+  if (flight && !flight.landed && activeView !== 'map' && !dragging && !pinch && !cam.auto && now - cam.lastInteract > FOLLOW_AFTER_MS
       && Math.abs(cam.vx) + Math.abs(cam.vy) < 0.01 && Math.abs(cam.tZoom - zoom) < 1e-3) {
     frameRoute(flight.from, flight.to, flightState(Date.now()).frac);
     cam.lastInteract = now;
@@ -592,7 +610,10 @@ canvas.addEventListener('pointerdown', e => {
 canvas.addEventListener('pointermove', e => {
   mouseX = e.clientX; mouseY = e.clientY;
   if (!pointers.has(e.pointerId)) {      // mouse hovering, no button down
-    if (e.pointerType === 'mouse') {
+    if (e.pointerType === 'mouse' && activeView === 'map') {
+      hoverCity = null; mapState.hover = mapHit(e.clientX, e.clientY, false);
+      canvas.style.cursor = mapState.hover ? 'pointer' : 'grab';
+    } else if (e.pointerType === 'mouse') {
       hoverCity = hitCity(e.clientX, e.clientY, false);
       canvas.style.cursor = hoverCity && uiState() === 'plan' ? 'pointer' : 'grab';
     }
@@ -633,14 +654,17 @@ function pointerEnd(e) {
       const max = 6; cam.vx = clamp(cam.vx, -max, max); cam.vy = clamp(cam.vy, -max, max);
     }
     dragging = false; grab = null;
-    if (e.type === 'pointerup' && press && !press.moved && press.city) onCityTap(press.city);
+    if (e.type === 'pointerup' && press && !press.moved) {
+      if (activeView === 'map') mapTap(press.x, press.y, e.pointerType !== 'mouse');
+      else if (press.city) onCityTap(press.city);
+    }
     press = null; pressedCity = null;
     canvas.style.cursor = 'grab';
   }
 }
 canvas.addEventListener('pointerup', pointerEnd);
 canvas.addEventListener('pointercancel', pointerEnd);
-canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !pointers.size) hoverCity = null; });
+canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !pointers.size) { hoverCity = null; mapState.hover = null; } });
 
 // Scroll wheel / trackpad: zoom glides towards the cursor. Chrome sends trackpad pinches
 // as ctrl+wheel; Safari sends its own gesture events (ignored during a touch pinch,
@@ -1384,6 +1408,7 @@ $('btn-new').addEventListener('click', () => { stopFlight(); sel.from = sel.to =
 // tabs
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => showView(tab.dataset.view)));
 function showView(name) {
+  const prev = activeView;
   activeView = name;
   document.querySelectorAll('.tab').forEach(t => {
     if (t.dataset.view === name) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
@@ -1395,6 +1420,13 @@ function showView(name) {
   closeAC();
   if (name === 'passes') renderHistory();
   if (name === 'fly') { textCache.clear(); renderState(); tick(); }
+  if (name === 'map' && prev !== 'map') { mapState.sel = null; renderMap(true); }
+  if (prev === 'map' && name !== 'map') {   // back from the map: return to the flight (or plan) being shown
+    mapState.hover = null;
+    const r = currentRoute();
+    if (r) frameRoute(r.from, r.to, r.prog);
+  }
+  setOffFrame(offFrame);   // the recentre button only belongs where there's one route
 }
 
 // ── History (stored via db.js) ────────────────────────────
@@ -1429,6 +1461,7 @@ async function saveToHistory(f, landT) {
       module: f.module || null          // no module = uncategorised (the field is simply left out)
     });
     if (activeView === 'passes') renderHistory();
+    if (activeView === 'map') renderMap(false);
   } catch(e) {
     console.error(e);
     setPill('couldn’t save this flight. check your connection.');
@@ -1775,6 +1808,317 @@ document.querySelectorAll('[data-unit]').forEach(b => b.addEventListener('click'
   document.querySelectorAll('[data-unit]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.unit === distUnit)));
 }));
 
+// ── Flight map tab ────────────────────────────────────────
+// Every landed flight as an arc, coloured by the continent it landed in. Flights on the
+// same route (same from → to) share one arc that gets thicker and brighter the more it's
+// been flown. Cities she's landed in get a dot that grows with each landing; places she
+// has only flown from get a small ring. "Been to" always means landed in.
+// Filters: destination continent, module, and dates (every flight has a date, even the
+// oldest ones). Tapping a route or a city shows its details in the sidebar.
+const DAY_MS = 86400000;
+const dayNum = d => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS);
+const dayDate = n => { const d = new Date(n * DAY_MS); return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
+function shortDate(d) {
+  const y = d.getFullYear() !== new Date().getFullYear() ? ` ${d.getFullYear()}` : '';
+  return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}${y}`;
+}
+// minutes she actually studied on a flight (older flights only have the "2h 52m" strings)
+function durStrMin(s) {
+  s = String(s || '');
+  const h = /(\d+)h/.exec(s), m = /(\d+)m/.exec(s), sec = /(\d+)s/.exec(s);
+  return (h ? +h[1] * 60 : 0) + (m ? +m[1] : 0) + (sec ? +sec[1] / 60 : 0);
+}
+function studiedMin(f) { return Number.isFinite(f.realMin) ? f.realMin : durStrMin(f.realDur || f.dur); }
+function minWords(min) { return min < 1 ? '0 min' : durWords(min * 60000); }
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a.toFixed(3)})`;
+}
+
+const UNCAT = '\u0000uncategorised';   // the module filter's "uncategorised" value (can't clash with a name)
+const mapState = {
+  all: [],              // every flight that can be drawn: { from, to, day, mins, module, pre }
+  cont: 'all', module: 'all',
+  min: 0, max: 0, d0: 0, d1: 0, loaded: false,
+  routes: [], cities: new Map(),
+  sel: null,            // { kind: 'route' | 'city', key } what she tapped
+  hover: null,
+};
+const mapEls = {
+  summary: $('map-summary'), conts: $('map-conts'), module: $('map-module'),
+  d0: $('map-d0'), d1: $('map-d1'), fill: $('map-range-fill'), dates: $('map-dates'),
+  custom: $('map-custom'), from: $('map-from'), to: $('map-to'),
+  presets: [...document.querySelectorAll('[data-preset]')], detail: $('map-detail'), hint: $('map-hint'),
+};
+
+async function renderMap(face) {
+  let h;
+  try {
+    const DB = await dbReady;
+    h = await DB.loadFlights();
+  } catch(e) {
+    console.error(e);
+    mapEls.summary.textContent = 'couldn’t load your flights. check your connection and open this tab again.';
+    return;
+  }
+  const today = dayNum(new Date());
+  mapState.all = [];
+  for (const f of h) {
+    const from = findCity(f.from), to = findCity(f.to), d = parseDDMMYYYY(f.date);
+    if (!from || !to || from === to || !d) continue;    // only real routes can be drawn
+    mapState.all.push({ from, to, day: dayNum(d), mins: studiedMin(f), km: Number(f.km) || routeKm(from, to),
+                        module: typeof f.module === 'string' ? f.module : null, pre: !Number.isFinite(f.flightMin) });
+  }
+  // the date range runs from her first flight to today; keep her choice if she'd set one
+  const first = mapState.all.reduce((m, f) => Math.min(m, f.day), today);
+  const wasAll = !mapState.loaded || (mapState.d0 === mapState.min && mapState.d1 === mapState.max);
+  const wasToToday = mapState.d1 === mapState.max;
+  mapState.min = Math.min(first, today - 1); mapState.max = today;
+  if (wasAll) { mapState.d0 = mapState.min; mapState.d1 = mapState.max; }
+  else {
+    mapState.d0 = clamp(mapState.d0, mapState.min, mapState.max);
+    mapState.d1 = wasToToday ? mapState.max : clamp(mapState.d1, mapState.d0, mapState.max);
+  }
+  mapState.loaded = true;
+  buildModuleOptions();
+  applyMapFilters();
+  if (face) faceMap();
+}
+
+function buildModuleOptions() {
+  const names = [...new Set(mapState.all.filter(f => f.module).map(f => f.module))].sort((a, b) => a.localeCompare(b));
+  const hasUncat = mapState.all.some(f => !f.module && !f.pre);
+  const opts = [['all', 'all modules'], ...names.map(n => [n, n]), ...(hasUncat ? [[UNCAT, 'uncategorised']] : [])];
+  if (!opts.some(o => o[0] === mapState.module)) mapState.module = 'all';
+  mapEls.module.replaceChildren(...opts.map(([v, t]) => { const o = el('option', null, t); o.value = v; return o; }));
+  mapEls.module.value = mapState.module;
+}
+
+// which flights pass the module and date filters (and the continent one, unless told not to)
+function mapMatches(f, withCont) {
+  if (f.day < mapState.d0 || f.day > mapState.d1) return false;
+  if (mapState.module === UNCAT) { if (f.module || f.pre) return false; }
+  else if (mapState.module !== 'all' && f.module !== mapState.module) return false;
+  return !withCont || mapState.cont === 'all' || f.to.ct.id === mapState.cont;
+}
+
+function applyMapFilters() {
+  const shown = mapState.all.filter(f => mapMatches(f, true));
+  // one arc per route, one entry per city
+  const routes = new Map(), cities = new Map();
+  const city = c => cities.get(c.n) || cities.set(c.n, { c, landed: 0, departed: 0, mins: 0, last: null }).get(c.n);
+  for (const f of shown) {
+    const key = f.from.n + '>' + f.to.n;
+    let r = routes.get(key);
+    if (!r) {
+      const a = ll2xyz(f.from.lat, f.from.lng), b = ll2xyz(f.to.lat, f.to.lng);
+      r = { key, from: f.from, to: f.to, n: 0, mins: 0, last: 0, pts: Array.from({ length: 49 }, (_, i) => slerp(a, b, i / 48)) };
+      routes.set(key, r);
+    }
+    r.n++; r.mins += f.mins; r.last = Math.max(r.last, f.day);
+    const t = city(f.to); t.landed++; t.mins += f.mins; t.last = Math.max(t.last || 0, f.day);
+    city(f.from).departed++;
+  }
+  mapState.routes = [...routes.values()].sort((a, b) => a.n - b.n);   // busiest drawn last, on top
+  mapState.cities = cities;
+
+  // summary line
+  const km = shown.reduce((s, f) => s + f.km, 0);
+  const countries = new Set(shown.map(f => f.to.c)).size;
+  mapEls.summary.textContent = !mapState.all.length ? 'no flights yet. every flight you land will be drawn here.'
+    : !shown.length ? 'no flights match these filters.'
+    : `${shown.length} flight${shown.length === 1 ? '' : 's'} · ${fmtDist(km)} · ${countries} countr${countries === 1 ? 'y' : 'ies'}`;
+
+  renderContinentChips();
+  renderDateRange();
+  showMapDetail();
+}
+
+function renderContinentChips() {
+  const counts = {};
+  for (const f of mapState.all) if (mapMatches(f, false)) counts[f.to.ct.id] = (counts[f.to.ct.id] || 0) + 1;
+  const chip = (id, label, color) => {
+    const b = el('button', 'chip'); b.type = 'button';
+    if (color) { const dot = el('span', 'chip-dot'); dot.style.background = color; b.append(dot); }
+    b.append(document.createTextNode(label));
+    b.setAttribute('aria-pressed', String(mapState.cont === id));
+    b.disabled = id !== 'all' && !counts[id] && mapState.cont !== id;
+    b.addEventListener('click', () => { mapState.cont = id; applyMapFilters(); });
+    return b;
+  };
+  mapEls.conts.replaceChildren(chip('all', 'all'), ...CONTINENTS.map(k => chip(k.id, k.label, k.color)));
+}
+
+function renderDateRange() {
+  const { min, max, d0, d1 } = mapState;
+  for (const inp of [mapEls.d0, mapEls.d1]) { inp.min = min; inp.max = max; }
+  mapEls.d0.value = d0; mapEls.d1.value = d1;
+  const pct = v => (max > min ? (v - min) / (max - min) * 100 : 0);
+  mapEls.fill.style.left = pct(d0) + '%'; mapEls.fill.style.right = (100 - pct(d1)) + '%';
+  mapEls.d0.style.zIndex = pct(d0) > 50 ? 3 : 1;     // when both handles meet, the one that can still move is on top
+  // the exact-date pickers (left alone while she's typing in one)
+  for (const [inp, v] of [[mapEls.from, d0], [mapEls.to, d1]]) {
+    inp.min = isoDay(min); inp.max = isoDay(max);
+    if (document.activeElement !== inp) inp.value = isoDay(v);
+  }
+  mapEls.dates.textContent = d0 === d1 ? shortDate(dayDate(d0)) : `${shortDate(dayDate(d0))} – ${shortDate(dayDate(d1))}`;
+  // light up the widest preset that matches (with only a few weeks of flights, "month" is the same as "all")
+  const on = d1 === max ? ['all', '30', '7'].find(pr => d0 === presetStart(pr)) : null;
+  mapEls.presets.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === on)));
+}
+// day number ↔ the "2026-11-15" text a date input uses
+function isoDay(n) { const d = dayDate(n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function dayFromIso(s) { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(s || ''); return m ? dayNum(new Date(+m[1], +m[2] - 1, +m[3])) : null; }
+function presetStart(p) { return p === 'all' ? mapState.min : Math.max(mapState.min, mapState.max - (Number(p) - 1)); }
+
+mapEls.module.addEventListener('change', () => { mapState.module = mapEls.module.value; applyMapFilters(); });
+mapEls.d0.addEventListener('input', () => { mapState.d0 = Math.min(Number(mapEls.d0.value), mapState.d1); applyMapFilters(); });
+mapEls.d1.addEventListener('input', () => { mapState.d1 = Math.max(Number(mapEls.d1.value), mapState.d0); applyMapFilters(); });
+// tapping the dates above the slider opens exact from/to pickers
+mapEls.dates.addEventListener('click', () => {
+  const open = mapEls.custom.hidden;
+  mapEls.custom.hidden = !open; mapEls.dates.setAttribute('aria-expanded', String(open));
+});
+mapEls.from.addEventListener('change', () => {
+  const n = dayFromIso(mapEls.from.value);
+  if (n != null) { mapState.d0 = clamp(n, mapState.min, mapState.d1); }
+  mapEls.from.blur(); applyMapFilters();
+});
+mapEls.to.addEventListener('change', () => {
+  const n = dayFromIso(mapEls.to.value);
+  if (n != null) { mapState.d1 = clamp(n, mapState.d0, mapState.max); }
+  mapEls.to.blur(); applyMapFilters();
+});
+mapEls.presets.forEach(b => b.addEventListener('click', () => {
+  mapState.d0 = presetStart(b.dataset.preset); mapState.d1 = mapState.max; applyMapFilters();
+}));
+
+// Turn the globe to face the middle of everything shown, whole globe in view.
+function faceMap() {
+  let x = 0, y = 0, z = 0;
+  for (const r of mapState.routes) for (const c of [r.from, r.to]) { const p = ll2xyz(c.lat, c.lng); x += p[0]; y += p[1]; z += p[2]; }
+  const len = Math.hypot(x, y, z);
+  if (len < 1e-6) { cam.auto = { rotX, rotY, zoom: 1 }; return; }
+  cam.auto = viewCentredOn([x / len, y / len, z / len], 1);
+}
+
+// ── Drawing ──
+function mapSelected() {
+  const s = mapState.sel;
+  if (!s) return null;
+  if (s.kind === 'route') { const r = mapState.routes.find(x => x.key === s.key); return r ? { kind: 'route', r } : null; }
+  const e = mapState.cities.get(s.key);
+  return e ? { kind: 'city', e } : null;
+}
+function routeLit(r, s) { return !s || (s.kind === 'route' ? s.r === r : r.from === s.e.c || r.to === s.e.c); }
+function cityDotR(e) { return e.landed ? Math.min(11, 2.6 + 1.7 * Math.sqrt(e.landed)) : 2.6; }
+
+function drawMap() {
+  const s = mapSelected(), hv = mapState.hover;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const r of mapState.routes) {
+    const lit = routeLit(r, s), k = Math.log2(r.n), col = r.to.ct.color;
+    const isHover = hv && hv.kind === 'route' && hv.r === r;
+    const w = 1.4 + 0.9 * k + (isHover ? 0.8 : 0);
+    const a = lit ? Math.min(1, 0.55 + 0.15 * k + (isHover ? 0.2 : 0)) : 0.1;
+    strokePath(r.pts);
+    if (lit && (r.n > 1 || (s && s.kind === 'route'))) { ctx.strokeStyle = hexA(col, a * 0.22); ctx.lineWidth = w + 6; ctx.stroke(); }
+    ctx.strokeStyle = hexA(col, a); ctx.lineWidth = w; ctx.stroke();
+  }
+  const labelAll = zoom >= 1.7;
+  for (const e of mapState.cities.values()) {
+    const p = projectLL(e.c.lat, e.c.lng);
+    if (!p.vis) continue;
+    const related = !s || (s.kind === 'city' ? s.e === e : s.r.from === e.c || s.r.to === e.c);
+    const isHover = hv && hv.kind === 'city' && hv.e === e;
+    const r = cityDotR(e) * (isHover ? 1.25 : 1), dim = related ? 1 : 0.25;
+    if (e.landed) {
+      ctx.fillStyle = hexA(e.c.ct.color, 0.95 * dim);
+      ctx.shadowColor = hexA(e.c.ct.color, 0.7 * dim); ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+    } else {
+      ctx.strokeStyle = `rgba(235,242,255,${(0.75 * dim).toFixed(3)})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.stroke();
+    }
+    if (related && (labelAll || isHover || s)) drawLabel(e.c.n, p.sx + r + 5, p.sy + 4, `rgba(235,242,255,${(0.92 * dim).toFixed(3)})`);
+  }
+}
+
+// ── Tapping ──
+function segDist(px, py, a, b) {
+  const dx = b.sx - a.sx, dy = b.sy - a.sy, L = dx * dx + dy * dy;
+  const t = L ? clamp(((px - a.sx) * dx + (py - a.sy) * dy) / L, 0, 1) : 0;
+  return Math.hypot(px - (a.sx + t * dx), py - (a.sy + t * dy));
+}
+// what's under a spot on screen: a city first (they're small targets), else the nearest route
+function mapHit(x, y, touch) {
+  let best = null, bd = touch ? 22 : 12;
+  for (const e of mapState.cities.values()) {
+    const p = projectLL(e.c.lat, e.c.lng);
+    if (!p.vis) continue;
+    const d = Math.max(0, Math.hypot(p.sx - x, p.sy - y) - cityDotR(e));
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (best) return { kind: 'city', e: best };
+  let rb = null, rd = touch ? 16 : 8;
+  for (const r of mapState.routes) {
+    let prev = null;
+    for (const pt of r.pts) {
+      const p = project(...pt);
+      if (!p.vis) { prev = null; continue; }
+      if (prev) { const d = segDist(x, y, prev, p); if (d <= rd) { rd = d; rb = r; } }
+      prev = p;
+    }
+  }
+  return rb ? { kind: 'route', r: rb } : null;
+}
+function mapTap(x, y, touch) {
+  const h = mapHit(x, y, touch);
+  const key = h && (h.kind === 'route' ? h.r.key : h.e.c.n);
+  const same = h && mapState.sel && mapState.sel.kind === h.kind && mapState.sel.key === key;
+  mapState.sel = h && !same ? { kind: h.kind, key } : null;
+  showMapDetail();
+}
+
+// ── The details card ──
+function showMapDetail() {
+  const s = mapSelected();
+  if (!s) mapState.sel = null;
+  mapEls.detail.hidden = !s; mapEls.hint.hidden = !!s || !mapState.routes.length;
+  if (!s) return;
+  const title = el('h3', 'map-detail-title'), sub = el('p', 'map-detail-sub');
+  const cells = [];
+  const cell = (label, value) => { const d = el('div'); d.append(el('dt', null, label), el('dd', null, value)); cells.push(d); };
+  if (s.kind === 'route') {
+    const r = s.r;
+    setRoute(title, r.from.n, r.to.n);
+    sub.textContent = `${r.from.a} → ${r.to.a} · ${fmtDist(routeKm(r.from, r.to))}`;
+    cell(r.n === 1 ? 'flight' : 'flights', r.n);
+    cell('studied', minWords(r.mins));
+    cell('last flown', shortDate(dayDate(r.last)));
+  } else {
+    const e = s.e;
+    title.textContent = e.c.n;
+    sub.textContent = `${e.c.c} · ${e.c.ct.label}`;
+    if (e.landed) {
+      cell('landed', `${e.landed} time${e.landed === 1 ? '' : 's'}`);
+      cell('studied', minWords(e.mins));
+      cell('last landed', shortDate(dayDate(e.last)));
+    } else {
+      sub.textContent += ' · not landed here yet';
+      cell('departures', e.departed);
+    }
+  }
+  const close = el('button', 'map-detail-close', '✕');
+  close.type = 'button'; close.setAttribute('aria-label', 'close details');
+  close.addEventListener('click', () => { mapState.sel = null; showMapDetail(); });
+  const head = el('div', 'map-detail-head');
+  const words = el('div'); words.append(title, sub);
+  head.append(words, close);
+  const dl = el('dl', 'map-stats'); dl.append(...cells);
+  mapEls.detail.replaceChildren(head, dl);
+}
+
 // ── Start-up ──────────────────────────────────────────────
 let lastFrame = 0, frameDt = 1 / 60;
 function loop(t) {
@@ -1787,10 +2131,13 @@ function loop(t) {
   drawStars(t || 0);
   drawGlobe();
   const now = Date.now();
-  if (viewRoute && activeView === 'passes') drawRoute(viewRoute.from, viewRoute.to, 1, false);
-  else if (flight) drawRoute(flight.from, flight.to, flightState(now).frac, !flight.landed, flight.paused, t);
-  else if (sel.from && sel.to && sel.from !== sel.to) drawRoute(sel.from, sel.to, 0, false);
-  drawCities();
+  if (activeView === 'map') drawMap();
+  else {
+    if (viewRoute && activeView === 'passes') drawRoute(viewRoute.from, viewRoute.to, 1, false);
+    else if (flight) drawRoute(flight.from, flight.to, flightState(now).frac, !flight.landed, flight.paused, t);
+    else if (sel.from && sel.to && sel.from !== sel.to) drawRoute(sel.from, sel.to, 0, false);
+    drawCities();
+  }
   updateHud(now);
   requestAnimationFrame(loop);
 }
