@@ -100,11 +100,12 @@ manifest, split into index.html / styles.css / app.js. original brief below.
   lands at the centre automatically.
 
 - **module selection** before flying: a picker from `modules`, plus "add new".
-- **pause and resume.** elapsed time becomes accumulated active time. a paused flight
+- **pause and resume** (done). elapsed time becomes accumulated active time. a paused flight
   survives refresh (same on-device persistence as the active flight). show the paused
   state clearly on the globe and hud. pomodoro resets to fresh focus on resume.
 - **custom pomodoro lengths** (focus / break minutes).
-- **more realistic flight times.** replace `km / 900` with an approximation of real block
+- **more realistic flight times** (done, simplified: airborne-only speed profile, no
+  jet stream, no real-route calibration, at kdot's request). replace `km / 900` with an approximation of real block
   time: ~30–40 min fixed overhead plus cruise at ~800–850 km/h, eastbound faster than
   westbound (jet stream). calibrate against 8–10 real routes (london–paris, london–new
   york both ways, london–tokyo, london–sydney, dubai–singapore, la–tokyo, …). show kdot

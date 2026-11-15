@@ -88,7 +88,54 @@ function haversine(la1, lo1, la2, lo2) {
   return 2*Rk*Math.asin(Math.sqrt(a));
 }
 function routeKm(from, to) { return haversine(from.lat, from.lng, to.lat, to.lng); }
-function routeMs(km) { return (km / 900) * 3600000; } // 900 km/h cruise (phase 2 makes this realistic)
+
+// ── Flight profile ────────────────────────────────────────
+// Airborne time only (no taxiing), built from simple speed ramps. Speeds km/h, times hours:
+//   runway    0 → 280 over 40 s         (still on the ground: "preparing for takeoff")
+//   climb     280 → 850 over 22 min
+//   cruise    850
+//   descent   850 → 250 over 28 min
+//   landing   250 → 30 over 40 s        (done once it's down to taxi speed)
+// Short hops never reach cruise: they climb part-way and start down again (same rates).
+const V_CRUISE = 850, V_LIFTOFF = 280, V_TOUCHDOWN = 250, V_TAXI = 30;
+const T_ROLL = 40 / 3600, T_CLIMB = 22 / 60, T_DESCENT = 28 / 60, T_ROLLOUT = 40 / 3600;
+function makeProfile(segs) {
+  let t = 0, d = 0;
+  for (const g of segs) { g.t0 = t; g.d0 = d; t += g.T; d += (g.v0 + g.v1) / 2 * g.T; }
+  return { segs: segs.filter(g => g.T > 1e-9), totalMs: t * 3600000, dist: d };
+}
+function buildProfile(km) {
+  const a1 = (V_CRUISE - V_LIFTOFF) / T_CLIMB, a2 = (V_CRUISE - V_TOUCHDOWN) / T_DESCENT;   // km/h per hour
+  const ground = V_LIFTOFF / 2 * T_ROLL + (V_TOUCHDOWN + V_TAXI) / 2 * T_ROLLOUT;
+  const air = Math.max(0, km - ground);
+  const climbD = v => (v * v - V_LIFTOFF ** 2) / (2 * a1), descD = v => (v * v - V_TOUCHDOWN ** 2) / (2 * a2);
+  let vp = V_CRUISE;
+  if (climbD(vp) + descD(vp) > air) {   // too short to reach cruise: find the top speed that fits
+    vp = Math.sqrt((air + V_LIFTOFF ** 2 / (2 * a1) + V_TOUCHDOWN ** 2 / (2 * a2)) / (1 / (2 * a1) + 1 / (2 * a2)));
+    vp = Math.max(vp, V_LIFTOFF + 1);
+  }
+  const tClimb = (vp - V_LIFTOFF) / a1, tDesc = (vp - V_TOUCHDOWN) / a2;
+  const tCruise = Math.max(0, air - climbD(vp) - descD(vp)) / vp;
+  return makeProfile([
+    { phase: 'runway',  T: T_ROLL,    v0: 0,           v1: V_LIFTOFF },
+    { phase: 'climb',   T: tClimb,    v0: V_LIFTOFF,   v1: vp },
+    { phase: 'cruise',  T: tCruise,   v0: vp,          v1: vp },
+    { phase: 'descent', T: tDesc,     v0: vp,          v1: V_TOUCHDOWN },
+    { phase: 'landing', T: T_ROLLOUT, v0: V_TOUCHDOWN, v1: V_TAXI },
+  ]);
+}
+// the old flat 900 km/h timing, kept only for a flight already in the air when this shipped
+function legacyProfile(km) { return makeProfile([{ phase: 'cruise', T: km / 900, v0: 900, v1: 900 }]); }
+// Where the plane is `ms` of flight time in: share of the distance, speed (km/h), phase.
+function profileAt(prof, ms) {
+  const t = ms / 3600000;
+  let g = prof.segs[0];
+  for (const s of prof.segs) if (t >= s.t0) g = s;
+  const u = Math.max(0, Math.min(g.T, t - g.t0));
+  const d = g.d0 + g.v0 * u + 0.5 * (g.v1 - g.v0) / g.T * u * u;
+  return { frac: Math.min(1, d / prof.dist), v: g.v0 + (g.v1 - g.v0) * u / g.T, phase: g.phase };
+}
+function routeMs(km) { return buildProfile(km).totalMs; }
 
 // The globe centres in whatever space the panel leaves: to its right on wide screens
 // (sidebar), above it on narrow ones (bottom panel). When that space changes (a panel
@@ -291,7 +338,7 @@ function drawCities() {
 }
 
 // The route: faint dashes ahead, an amber contrail behind, and the plane facing its heading.
-function drawRoute(from, to, prog, withPlane) {
+function drawRoute(from, to, prog, withPlane, paused, t) {
   const a = ll2xyz(from.lat, from.lng), b = ll2xyz(to.lat, to.lng);
   const steps = 160, cut = Math.round(steps * prog);
   const pts = Array.from({ length: steps + 1 }, (_, i) => slerp(a, b, i / steps));
@@ -310,10 +357,15 @@ function drawRoute(from, to, prog, withPlane) {
   const q = project(...slerp(a, b, Math.min(1, prog + 0.004)));
   const back = project(...slerp(a, b, Math.max(0, prog - 0.004)));
   const ang = Math.atan2(q.sy - back.sy, q.sx - back.sx);
+  if (paused) {   // a slow pulse round the plane, so it's clear the flight is holding
+    const k = reduceMotion.matches ? 0.5 : ((t || 0) / 1800) % 1;
+    ctx.strokeStyle = `rgba(168,183,207,${(0.55 * (1 - k)).toFixed(3)})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.sx, p.sy, 10 + k * 18, 0, Math.PI * 2); ctx.stroke();
+  }
   ctx.save();
   ctx.translate(p.sx, p.sy); ctx.rotate(ang);
-  ctx.shadowColor = 'rgba(255,189,90,0.9)'; ctx.shadowBlur = 12;
-  ctx.fillStyle = '#fff4dc';
+  ctx.shadowColor = paused ? 'rgba(0,0,0,0)' : 'rgba(255,189,90,0.9)'; ctx.shadowBlur = paused ? 0 : 12;
+  ctx.fillStyle = paused ? '#a8b7cf' : '#fff4dc';
   ctx.beginPath();   // a small plane, nose pointing along +x
   ctx.moveTo(11, 0); ctx.lineTo(7, -1.6); ctx.lineTo(1, -1.6); ctx.lineTo(-3, -9); ctx.lineTo(-6, -9);
   ctx.lineTo(-3, -1.6); ctx.lineTo(-8, -1.6); ctx.lineTo(-10, -4.5); ctx.lineTo(-12, -4.5); ctx.lineTo(-10.5, 0);
@@ -442,7 +494,7 @@ function updateCamera(dt) {   // dt in seconds
   // in flight and left alone: drift back to the route
   if (flight && !flight.landed && !dragging && !pinch && !cam.auto && now - cam.lastInteract > FOLLOW_AFTER_MS
       && Math.abs(cam.vx) + Math.abs(cam.vy) < 0.01 && Math.abs(cam.tZoom - zoom) < 1e-3) {
-    frameRoute(flight.from, flight.to, flightProgress(Date.now()));
+    frameRoute(flight.from, flight.to, flightState(Date.now()).frac);
     cam.lastInteract = now;
   }
 }
@@ -656,14 +708,11 @@ function validMinutes(v, [lo, hi]) {
 }
 
 // ── Milestone pill ────────────────────────────────────────
-const MESSAGES = [
-  {threshold:0,    text:"wheels up — lock in 👀"},
-  {threshold:0.25, text:"stay focused. 🫡"},
-  {threshold:0.5,  text:"halfway there. ⏳"},
-  {threshold:0.75, text:"almost done... 🥰"},
-  {threshold:1,    text:"landed. great session 🎉"},
-];
+// The message follows the flight's phase at the ends (runway, climb, descent,
+// touchdown) and her study time in between.
+const LANDED_MSG = 'landed. great session 🎉';
 const BREAK_MSG = 'break time. step away 🧘';
+const PAUSED_MSG = 'paused. take your time ☕';
 const pillEl = $('pill');
 let pillTarget = '', pillTimer = null;
 function setPill(text) {   // crossfade to new text
@@ -674,18 +723,27 @@ function setPill(text) {   // crossfade to new text
   clearTimeout(pillTimer);
   pillTimer = setTimeout(() => { pillEl.textContent = pillTarget; pillEl.classList.remove('out'); }, 280);
 }
-function getBannerMsg(p) {
-  let msg = MESSAGES[0].text;
-  for (const m of MESSAGES) { if (p >= m.threshold) msg = m.text; }
-  return msg;
+function bannerFor(now) {
+  if (flight.landed) return LANDED_MSG;
+  if (flight.paused) return PAUSED_MSG;
+  if (pomo && pomo.onBreak) return BREAK_MSG;
+  const { phase } = flightState(now), p = flightProgress(now);
+  if (phase === 'runway')  return 'preparing for takeoff 🛫';
+  if (phase === 'climb')   return 'wheels up — lock in 👀';
+  if (phase === 'descent') return 'starting our descent. almost there 🥰';
+  if (phase === 'landing') return 'touchdown 🛬';
+  return p >= 0.5 ? 'halfway there. ⏳' : 'stay focused. 🫡';
 }
-function updateBanner(p) { setPill((pomo && pomo.onBreak) ? BREAK_MSG : getBannerMsg(p)); }
+function updateBanner(now) { if (flight) setPill(bannerFor(now)); }
 
 // ── Flight timing ─────────────────────────────────────────
-// Flight time runs at `speed` × real time. We store how much flight time had passed
-// (virtMs) at the last speed change (lastT); everything else is worked out from the
-// clock. So a speed change never makes progress jump, and a tick that runs late
-// (background tab) still gives the right numbers.
+// Flight time runs at `speed` × real time, and stands still while paused. We store how
+// much flight time had passed (virtMs) at the last change of speed or pause (lastT);
+// everything else is worked out from the clock. So a speed change never makes progress
+// jump, and a tick that runs late (background tab) still gives the right numbers.
+// Two kinds of progress:
+//   flightProgress = share of the flight's TIME done: study timer, messages, halfway chime
+//   flightState    = where the plane IS (share of distance), its speed and phase
 let flight = null;
 const chkPomo  = $('chk-pomo');
 const speedBtns = [...document.querySelectorAll('[data-speed]')];
@@ -694,8 +752,13 @@ let chosenSpeed = 1;
 function selectedSpeed() { return chosenSpeed; }
 function showSpeed(v) { speedBtns.forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === v))); }
 function newFlightId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
-function flightVirt(now) { return flight.virtMs + (now - flight.lastT) * flight.speed; }
+function flightVirt(now) { return flight.paused ? flight.virtMs : flight.virtMs + (now - flight.lastT) * flight.speed; }
 function flightProgress(now) { return flight.landed ? 1 : Math.min(1, flightVirt(now) / flight.totalMs); }
+function flightState(now) {
+  return flight.landed ? { frac: 1, v: 0, phase: 'landed' } : profileAt(flight.prof, Math.min(flight.totalMs, flightVirt(now)));
+}
+// active real time so far, leaving out pauses
+function activeMs(now) { return (now - flight.startT) - flight.pausedMs - (flight.paused ? now - flight.pausedAt : 0); }
 
 // The flight in the air is kept on this device so a refresh (or reopening the tab)
 // carries on where it was. Only the unfinished flight lives here; finished flights are
@@ -705,8 +768,9 @@ function persistFlight() {
   try {
     if (!flight || flight.landed) { localStorage.removeItem(ACTIVE_KEY); return; }
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      v:1, id:flight.id, from:flight.from.n, to:flight.to.n, startT:flight.startT,
+      v:1, model:flight.model, id:flight.id, from:flight.from.n, to:flight.to.n, startT:flight.startT,
       virtMs:flight.virtMs, lastT:flight.lastT, speed:flight.speed, sped:flight.sped,
+      paused:flight.paused, pausedAt:flight.pausedAt, pausedMs:flight.pausedMs,
       pomoStart: pomo ? pomo.start : null,
       pomoFocus: pomo ? pomo.focus : null, pomoBreak: pomo ? pomo.brk : null,
     }));
@@ -724,7 +788,8 @@ function restoreFlight() {
 function startFlight(from, to, pomoMins) {
   stopFlight();
   const now = Date.now(), speed = selectedSpeed();
-  launch({ id:newFlightId(), from, to, startT:now, virtMs:0, lastT:now, speed, sped: speed > 1,
+  launch({ model:2, id:newFlightId(), from, to, startT:now, virtMs:0, lastT:now, speed, sped: speed > 1,
+           paused:false, pausedAt:null, pausedMs:0,
            pomoStart: pomoMins ? now : null,
            pomoFocus: pomoMins ? pomoMins.focus * 60000 : null,
            pomoBreak: pomoMins ? pomoMins.brk * 60000 : null }, false);
@@ -732,27 +797,32 @@ function startFlight(from, to, pomoMins) {
 
 function launch(s, restored) {
   const km = routeKm(s.from, s.to);
-  flight = { id:s.id, from:s.from, to:s.to, km, totalMs:routeMs(km),
+  // model 2 = the realistic profile. A flight saved before it existed (no model) keeps
+  // the old flat 900 km/h timing, so its progress doesn't jump when the app updates.
+  const model = s.model === 2 ? 2 : 1;
+  const prof = model === 2 ? buildProfile(km) : legacyProfile(km);
+  flight = { id:s.id, model, from:s.from, to:s.to, km, prof, totalMs:prof.totalMs,
              startT:s.startT, virtMs:s.virtMs, lastT:s.lastT, speed:s.speed, sped:!!s.sped,
+             paused:!!s.paused, pausedAt:s.pausedAt ?? null, pausedMs:s.pausedMs || 0,
              landed:false, halfwayChimed:false };
   const now = Date.now();
   pomo = s.pomoStart != null
     ? { start:s.pomoStart, focus:s.pomoFocus || POMO_DEFAULT.focus * 60000, brk:s.pomoBreak || POMO_DEFAULT.brk * 60000, onBreak:false }
     : null;
-  if (pomo) pomo.onBreak = pomoPhase(now).onBreak;               // no chime for the current phase
-  if (restored) flight.halfwayChimed = flightProgress(now) >= 0.5; // or for a halfway already passed
+  if (pomo && !flight.paused) pomo.onBreak = pomoPhase(now).onBreak;   // no chime for the current phase
+  if (restored) flight.halfwayChimed = flightProgress(now) >= 0.5;     // or for a halfway already passed
   sel.from = flight.from; sel.to = flight.to;
   chosenSpeed = flight.speed; showSpeed(chosenSpeed);
   persistFlight();
   if (!restored) playChime('takeoff');
-  frameRoute(flight.from, flight.to, flightProgress(now));
+  frameRoute(flight.from, flight.to, flightState(now).frac);
   cam.lastInteract = performance.now();
   renderState();
   tick();
 }
 
 function tick() {
-  if (!flight || flight.landed) return;
+  if (!flight || flight.landed || flight.paused) return;
   const now = Date.now();
   const virt = flightVirt(now);
   if (virt >= flight.totalMs) { land(); return; }
@@ -762,7 +832,7 @@ function tick() {
     if (onBreak !== pomo.onBreak) { pomo.onBreak = onBreak; playChime(onBreak ? 'break' : 'resume'); }
   }
   if (p >= 0.5 && !flight.halfwayChimed) { flight.halfwayChimed = true; playChime('halfway'); }
-  if (activeView === 'fly') updateBanner(p);
+  if (activeView === 'fly') updateBanner(now);
 }
 
 function land() {
@@ -770,6 +840,7 @@ function land() {
   const landT = Math.max(flight.startT, flight.lastT + (flight.totalMs - flight.virtMs) / flight.speed);
   flight.landed = true;
   flight.landT = landT;
+  flight.activeMs = Math.max(0, (landT - flight.startT) - flight.pausedMs);   // real study time, pauses left out
   pomo = null;
   persistFlight(); // clears the stored in-progress flight
   playChime('landing');
@@ -781,6 +852,29 @@ function stopFlight() {
   flight = null; pomo = null;
   persistFlight(); // clears the stored in-progress flight
   renderState();
+}
+
+// Pause freezes the flight clock and the pomodoro. Resuming starts a fresh focus period
+// (the pause was a break in itself). Paused time isn't counted anywhere.
+function pauseFlight() {
+  if (!flight || flight.landed || flight.paused) return;
+  tick();                        // land first if it was already due
+  if (flight.landed) return;
+  const now = Date.now();
+  flight.virtMs = flightVirt(now); flight.lastT = now;
+  flight.paused = true; flight.pausedAt = now;
+  persistFlight();
+  renderState();
+}
+function resumeFlight() {
+  if (!flight || !flight.paused) return;
+  const now = Date.now();
+  flight.pausedMs += now - flight.pausedAt;
+  flight.paused = false; flight.pausedAt = null; flight.lastT = now;
+  if (pomo) { pomo.start = now; pomo.onBreak = false; }
+  persistFlight();
+  renderState();
+  tick();
 }
 
 speedBtns.forEach(b => b.addEventListener('click', () => {
@@ -865,6 +959,7 @@ function renderState() {
   $('speed-row').hidden = st === 'landed';
   $('btn-fly').hidden = st !== 'plan';
   document.body.classList.toggle('in-flight', st === 'flying');
+  document.body.classList.toggle('paused', st === 'flying' && flight.paused);
   chkPomo.disabled = st === 'flying';
   textCache.clear();
   if (st === 'plan') {
@@ -876,14 +971,18 @@ function renderState() {
     $('pomo-ring').hidden = !pomo;
     $('fl-real').hidden = flight.speed === 1;
     resetStopButton();
+    const btnPause = $('btn-pause');
+    btnPause.textContent = flight.paused ? 'resume' : 'pause';
+    btnPause.classList.toggle('resume', flight.paused);
+    btnPause.setAttribute('aria-pressed', String(flight.paused));
     updateHud(Date.now());
-    updateBanner(flightProgress(Date.now()));
+    updateBanner(Date.now());
   } else {
     const f = flight;
     $('ld-title').textContent = `landed in ${f.to.n}`;
     $('ld-sub').textContent = `${fmtNum(f.km)} km and ${durWords(f.totalMs)} of study. lovely work.`;
     $('btn-onward').textContent = `fly onward from ${f.to.n}`;
-    setPill(MESSAGES[MESSAGES.length - 1].text);
+    setPill(LANDED_MSG);
   }
 }
 
@@ -911,13 +1010,26 @@ function updatePlan() {
 function updateHud(now) {
   if (uiState() !== 'flying') return;
   const virt = Math.min(flight.totalMs, flightVirt(now));
-  const p = virt / flight.totalMs;
+  const st = flightState(now);                       // where the plane is: distance share, speed, phase
   setText($('fl-left'), clock(flight.totalMs - virt));
+  setText($('fl-left-label'), flight.paused ? 'paused, take your time' : 'left in the air');
   if (flight.speed !== 1) setText($('fl-real'), `${clock((flight.totalMs - virt) / flight.speed)} real time at ${flight.speed}x`);
-  $('fl-bar').style.width = (p * 100).toFixed(2) + '%';
-  setText($('fl-flown'), `${fmtNum(p * flight.km)} km flown`);
-  setText($('fl-togo'), `${fmtNum(flight.km - p * flight.km)} km to go`);
-  if (pomo) {
+  const v = Math.round(st.v / 10) * 10;
+  setText($('fl-phase'), flight.paused ? 'holding position'
+    : st.phase === 'runway' ? 'on the runway'
+    : st.phase === 'climb' ? `climbing, ${v} km/h`
+    : st.phase === 'cruise' ? `cruising at ${v} km/h`
+    : st.phase === 'descent' ? `descending, ${v} km/h`
+    : 'touching down');
+  $('fl-bar').style.width = (st.frac * 100).toFixed(2) + '%';
+  setText($('fl-flown'), `${fmtNum(st.frac * flight.km)} km flown`);
+  setText($('fl-togo'), `${fmtNum(flight.km - st.frac * flight.km)} km to go`);
+  if (pomo && flight.paused) {                       // frozen; resuming starts a fresh focus period
+    $('pomo-ring').classList.remove('break');
+    $('pomo-arc').style.strokeDashoffset = '0';
+    setText($('pomo-time'), `${Math.round(pomo.focus / 60000)}m`);
+    setText($('pomo-phase'), 'paused');
+  } else if (pomo) {
     const ph = pomoPhase(now);
     $('pomo-ring').classList.toggle('break', ph.onBreak);
     $('pomo-arc').style.strokeDashoffset = (169.65 * (1 - ph.left / ph.limit)).toFixed(2);
@@ -1068,6 +1180,9 @@ btnStop.addEventListener('click', () => {
   stopArmTimer = setTimeout(resetStopButton, 3500);
 });
 
+// pause / resume
+$('btn-pause').addEventListener('click', () => { flight && flight.paused ? resumeFlight() : pauseFlight(); });
+
 // after landing
 $('btn-onward').addEventListener('click', () => { const next = flight.to; stopFlight(); sel.from = next; sel.to = null; inpTo.value = ''; renderState(); faceCity(next); inpTo.focus(); });
 $('btn-new').addEventListener('click', () => { stopFlight(); sel.from = sel.to = null; inpFrom.value = inpTo.value = ''; renderState(); });
@@ -1107,12 +1222,12 @@ async function saveToHistory(f, landT) {
       id: f.id,
       seq: h.reduce((m,x) => Math.max(m, x.seq), 0) + 1,
       from:f.from.n, to:f.to.n, km:Math.round(f.km),
-      dur:formatDur(f.km/900),
-      realDur: f.sped ? formatDur((landT - f.startT)/3600000) : null,
+      dur:formatDur(f.totalMs/3600000),
+      realDur: f.sped ? formatDur(f.activeMs/3600000) : null,
       date:ddmmyyyy(new Date(landT)),
-      // summable numbers for stats (see REVAMP.md phase 0); realMin will exclude pauses
+      // summable numbers for stats (see REVAMP.md phase 0); realMin leaves out pauses
       flightMin: Math.round(f.totalMs / 60000),
-      realMin: Math.round((landT - f.startT) / 60000),
+      realMin: Math.round(f.activeMs / 60000),
       startedAt: new Date(f.startT),
       endedAt: new Date(landT)
     });
@@ -1184,7 +1299,7 @@ function loop(t) {
   drawStars(t || 0);
   drawGlobe();
   const now = Date.now();
-  if (flight) drawRoute(flight.from, flight.to, flightProgress(now), !flight.landed);
+  if (flight) drawRoute(flight.from, flight.to, flightState(now).frac, !flight.landed, flight.paused, t);
   else if (sel.from && sel.to && sel.from !== sel.to) drawRoute(sel.from, sel.to, 0, false);
   drawCities();
   updateHud(now);

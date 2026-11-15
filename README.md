@@ -16,8 +16,11 @@ pick two cities, press fly, and study for as long as the flight takes.
 - **choosing a route:** tap a city on the globe for the departure, tap another for the
   destination, or type them (autocomplete, with arrow keys and enter). the card shows
   the distance and how long the flight will be before she takes off. 70 cities.
-- **flight time:** great-circle distance at 900 km/h, so a flight lasts `km / 900`
-  hours. london → paris is ~23 min; london → sydney is ~19 h.
+- **flight time:** airborne time only, from a simple speed profile: a 40-second takeoff
+  roll ("preparing for takeoff"), a 22-minute climb to 850 km/h, cruise, a 28-minute
+  descent and a 40-second touchdown. short hops never reach full cruise speed.
+  london → paris is ~42 min, london → tokyo ~11 h 33 m, london → sydney ~20 h 18 m.
+  the panel shows the phase and current speed ("cruising at 850 km/h").
 - **the globe:** drag (mouse or finger) to turn it, and the spot you grab stays under
   your finger; flick it to spin. scroll, pinch or trackpad-pinch to zoom in towards
   that spot (the globe's outline stays the same size). choosing a route turns the globe
@@ -25,7 +28,10 @@ pick two cities, press fly, and study for as long as the flight takes.
   the route is a dashed arc that fills in amber behind the plane.
 - **in flight:** the card shows the time left, distance flown and to go, and the
   pomodoro ring (blue = focus, amber = break). messages at the top change at takeoff,
-  25%, halfway, 75% and landing. stopping needs two taps, and a stopped flight isn't saved.
+  climb, cruise, halfway, descent and touchdown. stopping needs two taps, and a stopped
+  flight isn't saved.
+- **pause:** freezes the flight (the plane dims and pulses on the globe). paused time
+  isn't counted, and resuming starts a fresh pomodoro focus period. survives a refresh.
 - **pomodoro:** switch it on and choose focus and break minutes (default 50 / 10,
   remembered on each device). real wall-clock time; the flight keeps going during breaks.
 - **landing:** a summary card, with "fly onward" to start the next leg from there.

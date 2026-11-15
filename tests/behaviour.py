@@ -197,6 +197,94 @@ with sync_playwright() as p:
     ok(not errs, "no console errors: " + str(errs))
     ctx.close()
 
+    print("flight profile and pause")
+    ctx, page, errs = new_page(b, viewport={"width": 1440, "height": 900})
+    page.goto(BASE); page.wait_for_timeout(1200)
+    page.evaluate("localStorage.clear()")
+    table = page.evaluate("""(() => [['london','paris'],['london','new york'],['new york','london'],['london','tokyo'],['london','sydney'],['dubai','singapore'],['los angeles','tokyo'],['jaffna','singapore']].map(([a, b]) => {
+      const km = routeKm(findCity(a), findCity(b)), p = buildProfile(km);
+      const peak = Math.max(...p.segs.map(g => g.v1));
+      // sample: distance only ever increases, speed never jumps, ends at exactly 100%
+      let last = -1, lastV = 0, mono = true, smooth = true;
+      for (let i = 0; i <= 2000; i++) { const s = profileAt(p, p.totalMs * i / 2000); if (s.frac < last - 1e-12) mono = false;
+        last = s.frac; }
+      p.segs.forEach((g, i) => { if (i && Math.abs(g.v0 - p.segs[i-1].v1) > 1e-6) smooth = false; });
+      return { route: a + ' → ' + b, km: Math.round(km), old: km / 900 * 60, now: p.totalMs / 60000, peak, mono, smooth, end: profileAt(p, p.totalMs).frac, startF: profileAt(p, 0).frac };
+    }))()""")
+    print("    route                     km     old (km/900)   new (airborne)   top speed")
+    for r in table:
+        o, n = round(r['old']), round(r['now'])
+        print(f"    {r['route']:<24}{r['km']:>6}   {o//60:>5}h {o%60:02}m       {n//60:>5}h {n%60:02}m       {r['peak']:.0f} km/h")
+    ok(all(r["mono"] and r["smooth"] and abs(r["end"] - 1) < 1e-9 and r["startF"] == 0 for r in table), "profiles: start at 0%, end at exactly 100%, never go backwards, no speed jumps")
+    short = table[0]; ok(short["peak"] < 850 and short["now"] > short["old"], f"london → paris is too short to reach cruise (tops out at {short['peak']:.0f} km/h)")
+    ok(all(abs(r["peak"] - 850) < 1 for r in table[1:]), "longer routes reach 850 km/h cruise")
+
+    page.fill("#inp-from", "london"); page.fill("#inp-to", "tokyo"); page.click("#btn-fly"); page.wait_for_timeout(500)
+    ok(page.evaluate("flight.model") == 2, "new flights use the realistic profile")
+    ok("preparing for takeoff" in page.inner_text("#pill") or "preparing" in page.evaluate("pillTarget"), "on the runway: 'preparing for takeoff'")
+    ok(page.inner_text("#fl-phase") == "on the runway", "phase readout: on the runway")
+    page.evaluate("flight.virtMs = 10 * 60000; flight.lastT = Date.now(); tick()"); page.wait_for_timeout(400)
+    ok(page.evaluate("pillTarget").startswith("wheels up") and "climbing" in page.inner_text("#fl-phase"), "climbing: 'wheels up', " + page.inner_text("#fl-phase"))
+    page.evaluate("flight.virtMs = flight.totalMs * 0.6; flight.lastT = Date.now(); tick()"); page.wait_for_timeout(400)
+    ok(page.inner_text("#fl-phase") == "cruising at 850 km/h" and page.evaluate("pillTarget").startswith("halfway"), "cruising past halfway: 'halfway there', cruising at 850 km/h")
+    tf, df = page.evaluate("(() => { const v = flight.virtMs; flight.virtMs = flight.totalMs * 0.03; const r = [flightProgress(Date.now()), flightState(Date.now()).frac]; flight.virtMs = v; return r; })()")
+    ok(df < tf, f"early on, the climbing plane is behind the clock (time {tf:.3f}, distance {df:.3f})")
+    page.evaluate("flight.virtMs = flight.totalMs - 15 * 60000; flight.lastT = Date.now(); tick()"); page.wait_for_timeout(400)
+    ok(page.evaluate("pillTarget").startswith("starting our descent") and "descending" in page.inner_text("#fl-phase"), "descent: 'starting our descent', " + page.inner_text("#fl-phase"))
+
+    print("pause")
+    page.evaluate("flight.virtMs = flight.totalMs * 0.3; flight.lastT = Date.now(); pomo = null; tick()")
+    page.click("#btn-pause"); page.wait_for_timeout(300)
+    v1 = page.evaluate("flightVirt(Date.now())"); page.wait_for_timeout(1200); v2 = page.evaluate("flightVirt(Date.now())")
+    ok(v1 == v2 and page.evaluate("flight.paused"), "paused: the flight clock stands still")
+    ok(page.inner_text("#btn-pause") == "resume" and page.evaluate("document.body.classList.contains('paused')"), "button says resume; page shows paused")
+    ok(page.evaluate("pillTarget").startswith("paused") and page.inner_text("#fl-phase") == "holding position", "message: 'paused. take your time'")
+    page.reload(); page.wait_for_timeout(1200)
+    ok(page.evaluate("flight && flight.paused") and abs(page.evaluate("flightVirt(Date.now())") - v1) < 1, "refresh: still paused at the same point")
+    page.evaluate("flight.pausedAt -= 10 * 60000; flight.startT -= 40 * 60000; persistFlight()")   # 40 min flight, 10 of them paused
+    page.click("#btn-pause")
+    ok(not page.evaluate("flight.paused") and abs(page.evaluate("flight.pausedMs") - 10 * 60000) < 5000, "resume: carries on, 10 paused minutes recorded")
+    page.evaluate("flight.virtMs = flight.totalMs + 1; tick()"); page.wait_for_timeout(300)
+    saved = page.evaluate("window.__saved[window.__saved.length - 1]")
+    active = page.evaluate("flight.activeMs")
+    ok(saved["realMin"] == round(active / 60000) and 29 <= saved["realMin"] <= 31, f"real time leaves out the pause (40 min flight, 10 paused: realMin {saved['realMin']})")
+    ok(saved["dur"] and saved["flightMin"] == round(page.evaluate("flight.totalMs") / 60000), f"saved with the profile's duration ({saved['dur']})")
+
+    print("pause with pomodoro")
+    page.click("#btn-new"); page.check("#chk-pomo", force=True); page.fill("#pomo-focus", "25"); page.fill("#pomo-break", "5")
+    page.fill("#inp-from", "london"); page.fill("#inp-to", "tokyo"); page.click("#btn-fly"); page.wait_for_timeout(300)
+    page.evaluate("pomo.start = Date.now() - 27 * 60000; tick()")
+    ok(page.evaluate("pomo.onBreak"), "on a pomodoro break")
+    page.click("#btn-pause"); page.wait_for_timeout(300)
+    ok(page.inner_text("#pomo-phase") == "paused", "pomodoro ring shows paused")
+    page.click("#btn-pause"); page.wait_for_timeout(300)
+    ok(not page.evaluate("pomo.onBreak") and page.evaluate("Date.now() - pomo.start") < 2000, "resume starts a fresh focus period")
+    page.evaluate("stopFlight()"); page.uncheck("#chk-pomo", force=True)
+
+    print("old in-progress flight keeps its timing")
+    page.evaluate("""localStorage.setItem('activeFlight', JSON.stringify({v:1, id:'old1', from:'london', to:'paris', startT:Date.now()-60000, virtMs:0, lastT:Date.now()-60000, speed:1, sped:false, pomoStart:null}))""")
+    page.reload(); page.wait_for_timeout(1000)
+    ok(page.evaluate("flight.model") == 1 and abs(page.evaluate("flight.totalMs") - page.evaluate("flight.km / 900 * 3600000")) < 1, "a flight from before this update keeps km/900 timing")
+    ok(not errs, "no console errors: " + str(errs))
+    page.evaluate("stopFlight()")
+    ctx.close()
+
+    print("real db.js with no connection (nothing can reach the live database)")
+    ctx = b.new_context(viewport={"width": 1440, "height": 900})
+    ctx.route("**/firestore.googleapis.com/**", lambda r: r.abort())   # every server request fails
+    page = ctx.new_page(); errs = []
+    page.on("pageerror", lambda e: errs.append(str(e)))
+    page.goto(BASE); page.wait_for_timeout(2500)
+    page.evaluate("""DB.addFlight({id:'offline1', seq:1, from:'almaty', to:'dakar', km:1, dur:'1m', realDur:null, date:'01/01/2020'})""")
+    page.click(".tab[data-view=passes]"); page.wait_for_timeout(5500)
+    sel = ".hist-del[aria-label='delete almaty to dakar']"
+    ok(page.locator(sel).count() == 1, "offline: the list still loads (from this device's copy)")
+    page.locator(sel).click(); page.wait_for_timeout(200); page.locator(sel).click()
+    page.wait_for_timeout(8000)
+    ok(page.locator(sel).count() == 0, "offline: deleting removes the flight instead of freezing")
+    ok(not errs, "no page errors: " + str(errs))
+    ctx.close()
+
     print("ipad: touch")
     ctx, page, errs = new_page(b, viewport={"width": 1180, "height": 820}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page.goto(BASE); page.wait_for_timeout(1500)

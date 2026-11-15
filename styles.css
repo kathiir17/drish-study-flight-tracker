@@ -238,6 +238,15 @@ body.in-flight .live-dot { display: block; }
 .quiet:hover { background: rgba(255, 255, 255, .1); color: var(--ink); }
 .quiet.small { height: 32px; padding: 0 14px; border-radius: 10px; }
 .quiet.armed { background: rgba(255, 143, 135, .16); color: var(--rose); }
+.flight-actions { display: flex; gap: 8px; margin-top: 14px; }
+.flight-actions .quiet { flex: 1; height: 40px; }
+.quiet.resume { background: var(--amber); color: var(--amber-ink); font-weight: 600; }
+.quiet.resume:hover { background: var(--amber); filter: brightness(1.06); }
+.phase { margin-top: 8px; font: 500 var(--t-xs) var(--font-round); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.phase::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--amber); vertical-align: 1px; }
+/* paused: the numbers dim and the amber accents go quiet */
+body.paused .big-num, body.paused .fill, body.paused .ring { opacity: .45; transition: opacity .3s; }
+body.paused .phase::before, body.paused .live-dot { background: var(--ink-3); box-shadow: none; }
 
 /* in flight */
 .flight-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

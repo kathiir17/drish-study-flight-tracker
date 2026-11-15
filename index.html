@@ -85,12 +85,12 @@
     <div id="card-flight" class="block" hidden>
       <div class="flight-head">
         <h2 id="fl-route" class="route-title"></h2>
-        <button type="button" id="btn-stop" class="quiet small">stop</button>
       </div>
       <div class="flight-body">
         <div class="time-left">
           <div id="fl-left" class="big-num"></div>
-          <div class="sub">left in the air</div>
+          <div id="fl-left-label" class="sub">left in the air</div>
+          <div id="fl-phase" class="phase"></div>
           <div id="fl-real" class="sub" hidden></div>
         </div>
         <div id="pomo-ring" class="ring" hidden>
@@ -104,6 +104,10 @@
       <div class="progress">
         <div class="track"><div id="fl-bar" class="fill"></div></div>
         <div class="progress-meta"><span id="fl-flown"></span><span id="fl-togo"></span></div>
+      </div>
+      <div class="flight-actions">
+        <button type="button" id="btn-pause" class="quiet" aria-pressed="false">pause</button>
+        <button type="button" id="btn-stop" class="quiet">stop</button>
       </div>
     </div>
 

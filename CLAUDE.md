@@ -46,6 +46,9 @@ The filename must stay `index.html` for Pages to serve it.
   whole list.
 - Test in Safari (incl. iPhone) as well as Chrome. She's fully on Apple devices.
 - Anything from the database is shown with textContent, never innerHTML (anyone can add).
+- Never `await` a Firestore write or read without a timeout: write promises only resolve
+  when the server confirms, so offline/stalled they hang forever (this froze delete once).
+  db.js `settle()` gives writes 3 s, `loadFlights` falls back to the device copy after 4 s.
 
 ## How the app behaves
 - UI: full-screen globe + star field, with an Apple Maps-style floating sidebar panel
@@ -57,9 +60,17 @@ The filename must stay `index.html` for Pages to serve it.
   speed segmented control (1x–10000x) shown before takeoff and in flight.
 - Pick from/to by tapping cities on the globe (1st = from, 2nd = to) or typing
   (autocomplete with country, arrow keys). Pointer events handle mouse, touch drag and
-  pinch; Safari trackpad pinch comes as gesture events. Great-circle distance at
-  900 km/h, so duration = km/900 (to be replaced in phase 2).
-- Timing is clock-based: `flight.virtMs` at `flight.lastT` plus `(now - lastT) × speed`.
+  pinch; Safari trackpad pinch comes as gesture events.
+- Flight profile (`buildProfile`): airborne only, speed ramps: runway 0→280 km/h (40 s),
+  climb →850 (22 min), cruise 850, descent →250 (28 min), touchdown →30 (40 s). Short
+  routes peak below cruise. `flightProgress` = share of TIME (study timer, messages,
+  halfway chime); `flightState` = share of DISTANCE, speed and phase (plane, km flown).
+  Persisted flights carry `model: 2`; one without it keeps the old km/900 timing
+  (`legacyProfile`) so an in-progress flight never jumps when the app updates.
+- Pause: flight clock freezes (`flight.paused`, rebased like a speed change); paused time
+  (`pausedMs`) is left out of realDur/realMin; resume restarts the pomodoro's focus.
+  A paused flight survives refresh.
+- Timing is clock-based: `flight.virtMs` at `flight.lastT` plus `(now - lastT) × speed` (0 while paused).
   Never count ticks. A Web Worker drives `tick()`; `visibilitychange` catches up.
 - Speed can change mid-flight without jumping.
 - The in-progress flight is in localStorage (`activeFlight`) and resumes on reload;

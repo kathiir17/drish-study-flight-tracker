@@ -56,10 +56,12 @@ with sync_playwright() as p:
         page.wait_for_timeout(300)
         # jump the flight forward to ~40% without waiting, through the real speed control
         page.evaluate("flight.virtMs = flight.totalMs * 0.4; flight.lastT = Date.now(); pomo.start -= 21*60000")
-        page.wait_for_timeout(800); shot("4-flying")
+        page.wait_for_timeout(3000); shot("4-flying")
 
         page.evaluate("pomo.start -= 31*60000; tick()")
         page.wait_for_timeout(800); shot("5-flying-break")
+        page.click("#btn-pause"); page.wait_for_timeout(900); shot("5b-paused")
+        page.click("#btn-pause"); page.wait_for_timeout(300)
 
         page.click("[data-speed='10000']")
         page.wait_for_timeout(5000); shot("6-landed")

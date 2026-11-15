@@ -17,7 +17,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, doc, getDoc, getDocs, setDoc, deleteDoc,
+  collection, doc, getDoc, getDocs, getDocsFromCache, setDoc, deleteDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Public web config — safe to publish; access is controlled by firestore.rules.
@@ -37,14 +37,29 @@ const flights = collection(db, "flights");
 const modules = collection(db, "modules");
 const OPTIONAL_FIELDS = ["module", "flightMin", "realMin", "startedAt", "endedAt"];
 
-// All flights, newest first.
+// Firestore's write promises only resolve once the SERVER confirms. With no connection
+// (or a stalled one) they can wait forever, so we never make the page wait on them:
+// the change is already in this device's copy, and the upload carries on by itself.
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function settle(promise, label) {
+  promise.catch(e => console.error(label, e));
+  return Promise.race([promise, wait(3000)]);   // the server's answer if quick, else carry on
+}
+
+// All flights, newest first: from the server if it answers within 4 s, otherwise this
+// device's copy (offline, or a stalled connection).
 async function loadFlights() {
-  const snap = await getDocs(flights);
+  let snap;
+  try {
+    snap = await Promise.race([getDocs(flights), wait(4000).then(() => { throw new Error("server slow"); })]);
+  } catch (e) {
+    snap = await getDocsFromCache(flights);
+  }
   return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => b.seq - a.seq);
 }
 
-// Save a new flight. Resolves as soon as it is stored on the device (it is not
-// held up by a slow or missing connection); the upload continues in the background.
+// Save a new flight. Resolves within 3 s even with a slow or missing connection; it's
+// already stored on the device and the upload continues in the background.
 // Pass f.id to choose the document id (so a repeat save of the same flight is refused
 // by the rules rather than duplicated); otherwise a random one is made.
 // Returns the flight's id.
@@ -54,15 +69,13 @@ async function addFlight(f) {
   // Optional revamp fields: only sent when set (old flights simply don't have them).
   // startedAt/endedAt are JS Dates; Firestore stores them as timestamps.
   for (const k of OPTIONAL_FIELDS) if (f[k] != null) data[k] = f[k];
-  const upload = setDoc(ref, data);
-  upload.catch(e => console.error("Flight upload failed", e));
-  // Wait for the server if it answers quickly; otherwise carry on with the local copy.
-  await Promise.race([upload, new Promise(r => setTimeout(r, 3000))]);
+  await settle(setDoc(ref, data), "Flight upload failed");
   return ref.id;
 }
 
+// Gone from this device's copy at once; the server catches up in the background.
 async function deleteFlight(id) {
-  await deleteDoc(doc(flights, id));
+  await settle(deleteDoc(doc(flights, id)), "Flight delete failed");
 }
 
 // ── Modules ───────────────────────────────────────────────
@@ -84,9 +97,7 @@ async function addModule(name) {
   }
   const ref = doc(modules, n);
   if ((await getDoc(ref)).exists()) return n;
-  const upload = setDoc(ref, { name: n });
-  upload.catch(e => console.error("Module upload failed", e));
-  await Promise.race([upload, new Promise(r => setTimeout(r, 3000))]);
+  await settle(setDoc(ref, { name: n }), "Module upload failed");
   return n;
 }
 
