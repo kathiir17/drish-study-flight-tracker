@@ -90,6 +90,15 @@ manifest, split into index.html / styles.css / app.js. original brief below.
 
 ## phase 2 — core flight upgrades
 
+- **smooth globe motion.** zoom and drag feel jumpy ("comical"): make zoom glide to its
+  target instead of stepping per scroll event, zoom towards the point under the
+  cursor/fingers, keep the point under the finger under it while dragging, frame-rate
+  independent momentum, a soft stop at the poles, and a faster draw (precompute country
+  points) so nothing drops frames. measure frame rate with playwright before and after.
+- **turn the globe to face the route** (moved here from parked, same maths as above):
+  derive the target rotation from `project()`, glide to it, verify the route's midpoint
+  lands at the centre automatically.
+
 - **module selection** before flying: a picker from `modules`, plus "add new".
 - **pause and resume.** elapsed time becomes accumulated active time. a paused flight
   survives refresh (same on-device persistence as the active flight). show the paused
