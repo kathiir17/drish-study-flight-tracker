@@ -345,8 +345,11 @@ function drawLabel(text, x, y, color) {
   ctx.fillStyle = color; ctx.fillText(text, x, y);
 }
 
+// Where each city's name was drawn this frame, so the name can be hovered/tapped like its dot.
+let labelBoxes = [];
 function drawCities() {
   const showAll = zoom >= 1.7;
+  labelBoxes = [];
   const ends = currentEnds();
   for (const c of CITIES) {
     const isFrom = ends.from === c, isTo = ends.to === c;
@@ -366,7 +369,9 @@ function drawCities() {
       ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
     }
     if (showAll || isFrom || isTo || c === hoverCity || c === pressedCity) {
-      drawLabel(c.n, p.sx + r + 5, p.sy + 4, isTo ? '#ffd79a' : isFrom ? '#cfe6ff' : 'rgba(235,242,255,0.92)');
+      const lx = p.sx + r + 5, ly = p.sy + 4;
+      drawLabel(c.n, lx, ly, isTo ? '#ffd79a' : isFrom ? '#cfe6ff' : 'rgba(235,242,255,0.92)');
+      labelBoxes.push({ c, x0: p.sx - r, x1: lx + ctx.measureText(c.n).width, y0: ly - 12, y1: ly + 4 });
     }
   }
 }
@@ -570,7 +575,17 @@ let mouseX = 0, mouseY = 0;
 
 function hitCity(x, y, touch) {
   const max = touch ? 24 : 14;
-  let best = null, bestD = max;
+  let best = null, bestD = max, onDot = null;
+  for (const c of CITIES) {   // right on a dot wins over a name drawn across it
+    const p = projectLL(c.lat, c.lng);
+    if (p.vis && Math.hypot(p.sx - x, p.sy - y) < 6) { onDot = c; break; }
+  }
+  if (onDot) return onDot;
+  const pad = touch ? 6 : 2;  // then a city's name (latest drawn is on top)
+  for (let i = labelBoxes.length - 1; i >= 0; i--) {
+    const b = labelBoxes[i];
+    if (x >= b.x0 - pad && x <= b.x1 + pad && y >= b.y0 - pad && y <= b.y1 + pad) return b.c;
+  }
   for (const c of CITIES) {
     const p = projectLL(c.lat, c.lng);
     if (!p.vis) continue;
