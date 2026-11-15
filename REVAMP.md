@@ -99,7 +99,8 @@ manifest, split into index.html / styles.css / app.js. original brief below.
   derive the target rotation from `project()`, glide to it, verify the route's midpoint
   lands at the centre automatically.
 
-- **module selection** before flying: a picker from `modules`, plus "add new".
+- **module selection** (done): her list is built into app.js (`MODULE_GROUPS`), her
+  additions go to `modules`; flying with none asks first and counts as uncategorised.
 - **pause and resume** (done). elapsed time becomes accumulated active time. a paused flight
   survives refresh (same on-device persistence as the active flight). show the paused
   state clearly on the globe and hud. pomodoro resets to fresh focus on resume.
@@ -138,4 +139,3 @@ manifest, split into index.html / styles.css / app.js. original brief below.
 
 ## open questions
 
-- the seed list of her modules (kdot is compiling it).

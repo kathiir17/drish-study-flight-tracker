@@ -78,6 +78,11 @@ The filename must stay `index.html` for Pages to serve it.
 - Pomodoro: custom focus/break minutes (default 50/10, remembered per device in
   `pomoPrefs`); each flight stores its own lengths. Phase derived from the clock.
 - Stop and delete both need two taps.
+- Modules: her list is `MODULE_GROUPS` in app.js (year 4/5 modules a–c, year 6, cpp, exam prep);
+  ones she adds go to `modules/{name}` ("your modules"). The plan card's module row opens
+  a picker below the sidebar (above the panel on iPhone). Flying with none shows a
+  warning: yes = fly uncategorised (no `module` field saved), no = open the picker and
+  take off on pick. The chosen module stays selected between flights (not across reloads).
 - Chimes (Web Audio, synthesised): takeoff, halfway, landing, break, resume. None at
   25/75%. Audio unlocks on first tap (iOS silent-buffer trick).
 - History is saved only on landing, not on stop.
@@ -92,6 +97,8 @@ The filename must stay `index.html` for Pages to serve it.
   tests/behaviour.py checks both against project() on hundreds of random cases. The globe
   only spins and tilts (no roll), so points near a pole can't reach far left/right.
   All motion is time-based (`frameDt`); never use per-frame constants.
+- Recentre button (bottom left; above the panel on iPhone via `--panel-h`): shown once she
+  drags/zooms away from a route (`interacted()` → `setOffFrame(true)`); `frameRoute` hides it.
 - Zoom keeps the globe's circle fixed (`baseR`) and magnifies inside it (`R = baseR × zoom`,
   zoom 1–4). `project().vis` = near side AND inside the circle; drawGlobe clips to `baseR`.
   The panel slims (332 → 296px) in flight via `body.in-flight`.

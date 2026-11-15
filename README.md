@@ -24,7 +24,8 @@ pick two cities, press fly, and study for as long as the flight takes.
 - **the globe:** drag (mouse or finger) to turn it, and the spot you grab stays under
   your finger; flick it to spin. scroll, pinch or trackpad-pinch to zoom in towards
   that spot (the globe's outline stays the same size). choosing a route turns the globe
-  to frame it; mid-flight, leave it alone for 12 seconds and it drifts back to the route.
+  to frame it; after dragging away, **recentre** (bottom left) glides back, and mid-flight
+  it drifts back by itself after 12 seconds untouched.
   the route is a dashed arc that fills in amber behind the plane.
 - **in flight:** the card shows the time left, distance flown and to go, and the
   pomodoro ring (blue = focus, amber = break). messages at the top change at takeoff,
@@ -32,6 +33,9 @@ pick two cities, press fly, and study for as long as the flight takes.
   flight isn't saved.
 - **pause:** freezes the flight (the plane dims and pulses on the globe). paused time
   isn't counted, and resuming starts a fresh pomodoro focus period. survives a refresh.
+- **module:** choose what she's studying from her list (year 4 and 5 modules, year 6,
+  cpp, exam prep), search it, or add her own. flying without one asks first, and the flight counts
+  as uncategorised in stats.
 - **pomodoro:** switch it on and choose focus and break minutes (default 50 / 10,
   remembered on each device). real wall-clock time; the flight keeps going during breaks.
 - **landing:** a summary card, with "fly onward" to start the next leg from there.

@@ -142,10 +142,12 @@ function routeMs(km) { return buildProfile(km).totalMs; }
 // growing, a window resizing) the globe glides to its new place rather than jumping.
 const panelEl = document.getElementById('panel');
 let target = null;   // { cx, cy, r } the globe is easing towards
+// sidebar vs bottom panel: the same width rule as styles.css (max-width: 699px = bottom panel)
+const dockedQuery = window.matchMedia('(max-width: 699px)');
+function panelDocked() { return dockedQuery.matches; }
 function computeLayout() {
   const pr = panelEl.getBoundingClientRect();
-  const sidebar = pr.top < H * 0.5;               // narrow screens dock the panel at the bottom
-  if (sidebar) {
+  if (!panelDocked()) {
     const left = pr.right, w = W - left;
     return { cx: left + w / 2, cy: H / 2, r: Math.max(80, Math.min(w * 0.42, H * 0.42)) };
   }
@@ -155,6 +157,7 @@ function computeLayout() {
 function relayout(snap) {
   target = computeLayout();
   document.documentElement.style.setProperty('--globe-cx', target.cx + 'px');
+  document.documentElement.style.setProperty('--panel-h', (H - panelEl.getBoundingClientRect().top) + 'px');
   if (snap) { CX = target.cx; CY = target.cy; baseR = target.r; R = baseR * zoom; }
 }
 function resize() {
@@ -397,7 +400,27 @@ const cam = {
   samples: [],           // recent drag positions, for the flick speed on release
 };
 function setZoom(z) { zoom = clamp(z, ZOOM_MIN, ZOOM_MAX); R = baseR * zoom; }
-function interacted() { cam.auto = null; cam.lastInteract = performance.now(); }
+function interacted() { cam.auto = null; cam.lastInteract = performance.now(); setOffFrame(true); }
+
+// ── Recentre ──
+// Once she drags or zooms away from a route, a button (bottom left) glides back to its
+// framing. It hides again when the globe is reframed, by the button or the 12 s drift.
+const btnRecentre = document.getElementById('btn-recentre');
+let offFrame = false;
+function currentRoute() {
+  if (flight) return { from: flight.from, to: flight.to, prog: flightState(Date.now()).frac };
+  if (sel.from && sel.to && sel.from !== sel.to) return { from: sel.from, to: sel.to, prog: 0 };
+  return null;
+}
+function setOffFrame(v) {
+  offFrame = v;
+  btnRecentre.hidden = !(offFrame && currentRoute());
+}
+function recentre() {
+  const r = currentRoute();
+  if (r) { frameRoute(r.from, r.to, r.prog); cam.lastInteract = performance.now(); }
+}
+btnRecentre.addEventListener('click', recentre);
 
 // Screen spot → point on the Earth (unit vector, world coordinates), or null if the spot
 // isn't on the globe. The exact inverse of project().
@@ -454,6 +477,7 @@ function faceCity(c) {
 // Centre the route and zoom so it fills about three quarters of the circle. Routes too
 // long to fit on one side of the planet centre on the plane instead.
 function frameRoute(from, to, prog) {
+  setOffFrame(false);
   const a = ll2xyz(from.lat, from.lng), b = ll2xyz(to.lat, to.lng);
   const th = Math.acos(clamp(a[0]*b[0] + a[1]*b[1] + a[2]*b[2], -1, 1));   // angle between them
   if (th < 2.0) {
@@ -768,7 +792,7 @@ function persistFlight() {
   try {
     if (!flight || flight.landed) { localStorage.removeItem(ACTIVE_KEY); return; }
     localStorage.setItem(ACTIVE_KEY, JSON.stringify({
-      v:1, model:flight.model, id:flight.id, from:flight.from.n, to:flight.to.n, startT:flight.startT,
+      v:1, model:flight.model, id:flight.id, from:flight.from.n, to:flight.to.n, module:flight.module, startT:flight.startT,
       virtMs:flight.virtMs, lastT:flight.lastT, speed:flight.speed, sped:flight.sped,
       paused:flight.paused, pausedAt:flight.pausedAt, pausedMs:flight.pausedMs,
       pomoStart: pomo ? pomo.start : null,
@@ -788,7 +812,7 @@ function restoreFlight() {
 function startFlight(from, to, pomoMins) {
   stopFlight();
   const now = Date.now(), speed = selectedSpeed();
-  launch({ model:2, id:newFlightId(), from, to, startT:now, virtMs:0, lastT:now, speed, sped: speed > 1,
+  launch({ model:2, id:newFlightId(), from, to, module: sel.module, startT:now, virtMs:0, lastT:now, speed, sped: speed > 1,
            paused:false, pausedAt:null, pausedMs:0,
            pomoStart: pomoMins ? now : null,
            pomoFocus: pomoMins ? pomoMins.focus * 60000 : null,
@@ -801,7 +825,7 @@ function launch(s, restored) {
   // the old flat 900 km/h timing, so its progress doesn't jump when the app updates.
   const model = s.model === 2 ? 2 : 1;
   const prof = model === 2 ? buildProfile(km) : legacyProfile(km);
-  flight = { id:s.id, model, from:s.from, to:s.to, km, prof, totalMs:prof.totalMs,
+  flight = { id:s.id, model, from:s.from, to:s.to, module:s.module || null, km, prof, totalMs:prof.totalMs,
              startT:s.startT, virtMs:s.virtMs, lastT:s.lastT, speed:s.speed, sped:!!s.sped,
              paused:!!s.paused, pausedAt:s.pausedAt ?? null, pausedMs:s.pausedMs || 0,
              landed:false, halfwayChimed:false };
@@ -915,7 +939,7 @@ window.addEventListener('focus', onReturn);
 
 // ── Interface ─────────────────────────────────────────────
 // Three states on the fly tab: plan (choose a route), flying, landed.
-const sel = { from: null, to: null };           // the route being planned
+const sel = { from: null, to: null, module: null };   // the flight being planned (module stays chosen between flights)
 const inpFrom = $('inp-from'), inpTo = $('inp-to');
 const cardPlan = $('card-plan'), cardFlight = $('card-flight'), cardLanded = $('card-landed');
 const pomoFocusInp = $('pomo-focus'), pomoBreakInp = $('pomo-break');
@@ -968,6 +992,7 @@ function renderState() {
     updatePlan();
   } else if (st === 'flying') {
     setRoute($('fl-route'), flight.from.n, flight.to.n);
+    $('fl-module').textContent = flight.module || '';
     $('pomo-ring').hidden = !pomo;
     $('fl-real').hidden = flight.speed === 1;
     resetStopButton();
@@ -980,7 +1005,7 @@ function renderState() {
   } else {
     const f = flight;
     $('ld-title').textContent = `landed in ${f.to.n}`;
-    $('ld-sub').textContent = `${fmtNum(f.km)} km and ${durWords(f.totalMs)} of study. lovely work.`;
+    $('ld-sub').textContent = `${fmtNum(f.km)} km and ${durWords(f.totalMs)} of ${f.module || 'study'}. lovely work.`;
     $('btn-onward').textContent = `fly onward from ${f.to.n}`;
     setPill(LANDED_MSG);
   }
@@ -1093,7 +1118,7 @@ function placeAC(inp) {
   const r = inp.getBoundingClientRect();
   acEl.style.left = r.left + 'px';
   acEl.style.width = r.width + 'px';
-  if (r.top > H * 0.5) { acEl.style.top = 'auto'; acEl.style.bottom = (H - r.top + 8) + 'px'; }
+  if (panelDocked()) { acEl.style.top = 'auto'; acEl.style.bottom = (H - r.top + 8) + 'px'; }
   else { acEl.style.bottom = 'auto'; acEl.style.top = (r.bottom + 6) + 'px'; }
 }
 function closeAC() {
@@ -1167,8 +1192,15 @@ cardPlan.addEventListener('submit', e => {
     mins = { focus, brk };
     Object.assign(prefs, mins); savePrefs(prefs);
   }
+  sel.from = from; sel.to = to;
+  if (!sel.module && !e.skipModuleCheck) { askNoModule(); return; }
   startFlight(from, to, mins);
 });
+function submitPlan(skipModuleCheck) {   // press fly from code (after the warning or the picker)
+  const ev = new Event('submit', { cancelable: true });
+  ev.skipModuleCheck = skipModuleCheck;
+  cardPlan.dispatchEvent(ev);
+}
 
 // stop: two taps, so a stray click doesn't throw away a session
 const btnStop = $('btn-stop');
@@ -1179,6 +1211,149 @@ btnStop.addEventListener('click', () => {
   btnStop.classList.add('armed'); btnStop.textContent = 'stop? it won’t be saved';
   stopArmTimer = setTimeout(resetStopButton, 3500);
 });
+
+// ── Modules ───────────────────────────────────────────────
+// Her module list lives here (grouped, like the cities); modules she adds go to the
+// database ("your modules"). A flight records the module's name; none = uncategorised.
+const MODULE_GROUPS = [
+  { label: 'year 4, module a', items: ['acute medicine', 'cardiology', 'endocrinology', 'respiratory'] },
+  { label: 'year 4, module b', items: ['gastroenterology & hepatology', 'gastrointestinal surgery', 'rheumatology',
+                                       'trauma & orthopaedics', 'peri-operative care & anaesthetics', 'vascular surgery'] },
+  { label: 'year 4, module c', items: ['ear, nose & throat', 'haematology', 'infectious diseases', 'nephrology', 'neurology'] },
+  { label: 'year 5, module a', items: ['child health', 'core general practice', 'child & adolescent mental health'] },
+  { label: 'year 5, module b', items: ['breast', 'dermatology', 'obstetrics & gynaecology', 'sexual health & hiv medicine', 'urology'] },
+  { label: 'year 5, module c', items: ['cancer medicine', 'care of the older person', 'ophthalmology', 'palliative care', 'psychiatry'] },
+  { label: 'year 6', items: ['gp assistantship', 'hospital assistantship'] },
+  { label: 'cpp', items: ['uses of medicine', 'ethics and law'] },
+  { label: 'exam prep', items: ['akt', 'osce'] },
+];
+const BUILT_IN_MODULES = new Set(MODULE_GROUPS.flatMap(g => g.items));
+let customModules = [];
+const moduleMenu = $('module-menu'), moduleList = $('module-list'), moduleSearch = $('module-search');
+const btnModule = $('btn-module');
+let flyAfterPick = false;   // the picker was opened from the "no module" warning: picking takes off
+
+async function loadCustomModules() {
+  try {
+    const DB = await dbReady;
+    customModules = (await DB.loadModules()).filter(n => !BUILT_IN_MODULES.has(n));
+    if (!moduleMenu.hidden) renderModuleList();
+  } catch (e) { console.error(e); }
+}
+function showModule() {
+  const v = $('module-value');
+  v.textContent = sel.module || 'choose a module';
+  v.classList.toggle('empty', !sel.module);
+}
+function renderModuleList() {
+  const q = moduleSearch.value.trim().toLowerCase();
+  const groups = [...MODULE_GROUPS, { label: 'your modules', items: customModules }]
+    .map(g => ({ label: g.label, items: g.items.filter(n => !q || n.includes(q) || g.label.includes(q)) }))
+    .filter(g => g.items.length);
+  const item = (name, label, cls) => {
+    const b = el('button', 'module-item' + (cls ? ' ' + cls : ''), label);
+    b.type = 'button'; b.setAttribute('role', 'option');
+    b.setAttribute('aria-selected', String(sel.module === name));
+    b.addEventListener('click', () => chooseModule(name));
+    return b;
+  };
+  const out = [];
+  if (!q) out.push(item(null, 'no module (uncategorised)', 'none'));
+  for (const g of groups) { out.push(el('div', 'module-group', g.label)); g.items.forEach(n => out.push(item(n, n))); }
+  if (!groups.length) out.push(el('p', 'module-empty', `no module matches “${q}”. add it below.`));
+  moduleList.replaceChildren(...out);
+}
+// below the sidebar if there's room; beside it if not; above the panel when it's docked at the bottom
+function placeModuleMenu() {
+  const pr = panelEl.getBoundingClientRect(), m = moduleMenu.style;
+  m.left = m.right = m.top = m.bottom = m.width = m.maxHeight = '';
+  if (!panelDocked()) {
+    const below = H - pr.bottom - 26;
+    if (below >= 260) { m.left = pr.left + 'px'; m.top = (pr.bottom + 10) + 'px'; m.width = pr.width + 'px'; m.maxHeight = below + 'px'; }
+    else { m.left = (pr.right + 10) + 'px'; m.top = pr.top + 'px'; m.width = pr.width + 'px'; m.maxHeight = (H - pr.top - 16) + 'px'; }
+  } else {
+    m.left = pr.left + 'px'; m.width = pr.width + 'px';
+    m.bottom = (H - pr.top + 8) + 'px'; m.maxHeight = Math.max(200, pr.top - 70) + 'px';
+  }
+}
+function openModuleMenu(thenFly) {
+  flyAfterPick = !!thenFly;
+  closeAC();
+  moduleSearch.value = ''; $('module-new').value = ''; $('module-msg').textContent = '';
+  renderModuleList();
+  moduleMenu.hidden = false;
+  btnModule.setAttribute('aria-expanded', 'true');
+  placeModuleMenu();
+  const chosen = moduleList.querySelector('[aria-selected="true"]');
+  if (chosen) chosen.scrollIntoView({ block: 'center' });
+  if (window.matchMedia('(hover: hover)').matches) moduleSearch.focus();   // no surprise keyboard on touch screens
+  loadCustomModules();
+}
+function closeModuleMenu() {
+  moduleMenu.hidden = true; flyAfterPick = false;
+  btnModule.setAttribute('aria-expanded', 'false');
+}
+function chooseModule(name) {
+  const fly = flyAfterPick;
+  sel.module = name;
+  showModule();
+  closeModuleMenu();
+  btnModule.classList.remove('nudge');
+  if (fly && uiState() === 'plan') submitPlan(true);
+}
+btnModule.addEventListener('click', () => moduleMenu.hidden ? openModuleMenu(false) : closeModuleMenu());
+moduleSearch.addEventListener('input', renderModuleList);
+moduleSearch.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); const first = moduleList.querySelector('.module-item:not(.none)'); if (first) first.click(); }
+});
+$('module-add').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('module-msg');
+  const name = $('module-new').value.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!name) { msg.textContent = 'type a module name first.'; return; }
+  if (name.length > 40 || name.includes('/') || name === '.' || name === '..' || /^__.*__$/.test(name)) {
+    msg.textContent = 'module names can be up to 40 characters, without a “/”.'; return;
+  }
+  if (BUILT_IN_MODULES.has(name) || customModules.includes(name)) { chooseModule(name); return; }
+  try {
+    const DB = await dbReady;
+    const n = await DB.addModule(name);
+    if (!customModules.includes(n)) customModules.push(n);
+    customModules.sort((a, b) => a.localeCompare(b));
+    chooseModule(n);
+  } catch (err) {
+    console.error(err);
+    msg.textContent = 'couldn’t add that module. check your connection and try again.';
+  }
+});
+// close when tapping elsewhere, or with escape
+document.addEventListener('pointerdown', e => {
+  if (!moduleMenu.hidden && !moduleMenu.contains(e.target) && !btnModule.contains(e.target)) closeModuleMenu();
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!$('confirm').hidden) { e.preventDefault(); answerNoModule(false); }
+  else if (!moduleMenu.hidden) { closeModuleMenu(); btnModule.focus(); }
+});
+window.addEventListener('resize', () => { if (!moduleMenu.hidden) placeModuleMenu(); });
+if (window.ResizeObserver) new ResizeObserver(() => { if (!moduleMenu.hidden) placeModuleMenu(); }).observe(panelEl);
+
+// flying with no module: ask first. yes = fly uncategorised; no = open the picker,
+// and picking a module then takes off straight away.
+function askNoModule() {
+  closeModuleMenu();
+  $('confirm').hidden = false;
+  $('confirm-yes').focus();
+}
+function answerNoModule(yes) {
+  $('confirm').hidden = true;
+  if (yes) submitPlan(true);
+  else { btnModule.classList.add('nudge'); openModuleMenu(true); }
+}
+$('confirm-yes').addEventListener('click', () => answerNoModule(true));
+$('confirm-no').addEventListener('click', () => answerNoModule(false));
+$('confirm').addEventListener('pointerdown', e => { if (e.target === $('confirm')) answerNoModule(false); });
+showModule();
 
 // pause / resume
 $('btn-pause').addEventListener('click', () => { flight && flight.paused ? resumeFlight() : pauseFlight(); });
@@ -1229,7 +1404,8 @@ async function saveToHistory(f, landT) {
       flightMin: Math.round(f.totalMs / 60000),
       realMin: Math.round(f.activeMs / 60000),
       startedAt: new Date(f.startT),
-      endedAt: new Date(landT)
+      endedAt: new Date(landT),
+      module: f.module || null          // no module = uncategorised (the field is simply left out)
     });
     if (activeView === 'passes') renderHistory();
   } catch(e) {
@@ -1272,7 +1448,7 @@ async function renderHistory() {
   list.replaceChildren(...h.map(f => {
     const route = el('div', 'hist-route');
     route.append(String(f.from), el('span', 'arrow', '→'), String(f.to));
-    const detail = el('div', 'hist-detail', `${f.date}, ${fmtNum(f.km)} km, ${f.dur}${f.realDur ? ` (${f.realDur} real)` : ''}`);
+    const detail = el('div', 'hist-detail', `${f.module ? f.module + ', ' : ''}${f.date}, ${fmtNum(f.km)} km, ${f.dur}${f.realDur ? ` (${f.realDur} real)` : ''}`);
     const main = el('div', 'hist-main'); main.append(route, detail);
     const del = el('button', 'hist-del', '✕');
     del.type = 'button'; del.setAttribute('aria-label', `delete ${f.from} to ${f.to}`);

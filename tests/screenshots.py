@@ -18,7 +18,7 @@ window.DB = {
   loadFlights: async () => [...window.__saved.map((f,i)=>({...f})), ...flights].sort((a,b)=>b.seq-a.seq),
   addFlight: async f => { window.__saved.push(f); return f.id; },
   deleteFlight: async id => { const i = flights.findIndex(f=>f.id===id); if (i>=0) flights.splice(i,1); },
-  loadModules: async () => [], addModule: async n => n,
+  loadModules: async () => ['anatomy revision'], addModule: async n => n,
 };
 window.dispatchEvent(new Event('db-ready'));
 """
@@ -50,6 +50,10 @@ with sync_playwright() as p:
         page.evaluate("onCityTap(findCity('tokyo'))")
         page.wait_for_timeout(400); shot("3-plan-route")
 
+        page.evaluate("chooseModule(null)"); page.click("#btn-fly"); page.wait_for_timeout(500); shot("3b-no-module-warning")
+        page.click("#confirm-no"); page.wait_for_timeout(600); shot("3c-module-picker")
+        page.keyboard.press("Escape"); page.mouse.click(5, 5); page.wait_for_timeout(200)
+        page.evaluate("chooseModule('cardiology')")
         page.check("#chk-pomo", force=True)
         page.wait_for_timeout(200)
         page.click("#btn-fly")

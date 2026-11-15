@@ -23,6 +23,11 @@
 
 <div id="pill" class="pill" aria-live="polite"></div>
 
+<button type="button" id="btn-recentre" class="recentre" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2" class="dot"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+  recentre
+</button>
+
 
 <aside id="panel" class="panel">
   <nav class="tabs" aria-label="sections">
@@ -67,6 +72,12 @@
 
       <p id="route-preview" class="preview"></p>
 
+      <button type="button" id="btn-module" class="module-field" aria-haspopup="dialog" aria-expanded="false" aria-controls="module-menu">
+        <span class="module-label">module</span>
+        <span id="module-value" class="module-value">choose a module</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>
+      </button>
+
       <div class="pomo-row">
         <label class="toggle">
           <input type="checkbox" id="chk-pomo" role="switch"/>
@@ -84,7 +95,10 @@
 
     <div id="card-flight" class="block" hidden>
       <div class="flight-head">
-        <h2 id="fl-route" class="route-title"></h2>
+        <div class="route-block">
+          <h2 id="fl-route" class="route-title"></h2>
+          <div id="fl-module" class="module-tag"></div>
+        </div>
       </div>
       <div class="flight-body">
         <div class="time-left">
@@ -162,6 +176,30 @@
   </div>
 </aside>
 
+
+<!-- module picker: opens below the sidebar (above the panel on a phone); app.js places it -->
+<div id="module-menu" class="module-menu" role="dialog" aria-label="choose a module" hidden>
+  <input id="module-search" class="module-search" placeholder="search modules" aria-label="search modules"
+         autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off"/>
+  <div id="module-list" class="module-list"></div>
+  <form id="module-add" class="module-add" autocomplete="off">
+    <input id="module-new" placeholder="add a new module" aria-label="new module name" maxlength="40" spellcheck="false" autocapitalize="off"/>
+    <button type="submit" class="quiet small">add</button>
+  </form>
+  <p id="module-msg" class="msg" role="alert"></p>
+</div>
+
+<!-- flying with no module chosen -->
+<div id="confirm" class="modal-backdrop" hidden>
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <h2 id="confirm-title">no module selected</h2>
+    <p id="confirm-body">are you sure you want to fly without one? this flight will count as uncategorised in your stats.</p>
+    <div class="actions">
+      <button type="button" id="confirm-no" class="quiet">no, pick a module</button>
+      <button type="button" id="confirm-yes" class="primary">yes, fly anyway</button>
+    </div>
+  </div>
+</div>
 
 <!-- city suggestions: at page level so the panel's scrolling can't clip it; app.js positions it -->
 <ul id="ac" class="ac" role="listbox" hidden></ul>
