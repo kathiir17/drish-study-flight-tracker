@@ -180,11 +180,18 @@ const CITIES = [
   {n:'perth',lat:-31.95,lng:115.86},{n:'jaffna',lat:9.67,lng:80.02},
 ];
 
+// Country shapes from the CDN, pinned to exact versions with integrity hashes: the
+// browser refuses the file if its contents ever differ from what we checked, so a
+// compromised CDN or package release can't run code on the page. Upgrading either
+// means updating the version AND recomputing its hash.
 let geo = null;
 const topoScript = document.createElement('script');
-topoScript.src = 'https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js';
+topoScript.src = 'https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js';
+topoScript.integrity = 'sha384-Ukv1p/xTma6P4/2bY5KzWBw+ydSpXmhCMtyciIQVDJ1RmOxtCYNMF1uXT9T63H67';
+topoScript.crossOrigin = 'anonymous';
 topoScript.onload = () => {
-  fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+  fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json',
+        { integrity: 'sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf' })
     .then(r => r.json()).then(t => {
       geo = { type:'FeatureCollection', features: topojson.feature(t, t.objects.countries).features };
     });
@@ -490,14 +497,29 @@ async function renderHistory() {
     list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:#2a5a8a">no completed flights yet.</div>';
     return;
   }
-  list.innerHTML = h.map(f =>
-    '<div class="hist-row">'+
-      '<span style="color:#7ec8ff">'+f.from+' → '+f.to+'</span>'+
-      '<span style="color:#2a6a9a;margin:0 10px">'+f.km+' km · '+f.dur+(f.realDur?' · '+f.realDur+' real':'')+'</span>'+
-      '<span style="color:#2a5a8a;margin-right:10px">'+f.date+'</span>'+
-      '<span onclick="deleteHistory(\''+f.id+'\')" style="color:#5a1e1e;cursor:pointer;font-size:15px" onmouseover="this.style.color=\'#ff7e7e\'" onmouseout="this.style.color=\'#5a1e1e\'">✕</span>'+
-    '</div>'
-  ).join('');
+  // Anyone with the link can add a flight, so nothing from the database is ever turned
+  // into HTML: every value goes in as plain text (textContent), and the ✕ is wired up
+  // directly instead of pasting the id into code.
+  const span = (text, css) => {
+    const s = document.createElement('span');
+    s.textContent = String(text); s.style.cssText = css;
+    return s;
+  };
+  list.replaceChildren(...h.map(f => {
+    const row = document.createElement('div');
+    row.className = 'hist-row';
+    const del = span('✕', 'color:#5a1e1e;cursor:pointer;font-size:15px');
+    del.addEventListener('mouseover', () => del.style.color = '#ff7e7e');
+    del.addEventListener('mouseout',  () => del.style.color = '#5a1e1e');
+    del.addEventListener('click', () => deleteHistory(f.id));
+    row.append(
+      span(f.from+' → '+f.to, 'color:#7ec8ff'),
+      span(f.km+' km · '+f.dur+(f.realDur ? ' · '+f.realDur+' real' : ''), 'color:#2a6a9a;margin:0 10px'),
+      span(f.date, 'color:#2a5a8a;margin-right:10px'),
+      del
+    );
+    return row;
+  }));
 }
 document.getElementById('btn-hist').addEventListener('click', () => {
   const p = document.getElementById('hist-panel');
