@@ -4,16 +4,30 @@ rules_version = '2';
 //
 // Apply: Firebase console → Firestore Database → Rules → paste this whole file → Publish.
 //
-//   • Anyone with the link can read flights, add a correctly-shaped flight, or delete one
-//     (same openness as before). Nobody can edit a flight or write anywhere else.
-//   • Only the project owner (Firebase console / admin key) bypasses these rules.
+//   • Anyone with the link can read flights, add a correctly-shaped flight, or delete one.
+//     Nobody can edit a flight.
+//   • Anyone can read modules or add a correctly-shaped one. Modules can't be edited or
+//     deleted. A module's document id is its name, so duplicates are refused.
+//   • Everything else is denied. Only the project owner (Firebase console / admin key)
+//     bypasses these rules.
+//
+// New flight fields are OPTIONAL on purpose: an old copy of the app still open on a
+// device saves flights without them, and requiring them would lose that flight.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // an optional field: absent, or present and passing `ok`
+    function optional(d, key, ok) {
+      return !(key in d) || ok;
+    }
+
     function validFlight(d) {
-      return d.keys().hasOnly(['seq', 'from', 'to', 'km', 'dur', 'realDur', 'date'])
+      return d.keys().hasOnly(['seq', 'from', 'to', 'km', 'dur', 'realDur', 'date',
+                               'module', 'flightMin', 'realMin', 'startedAt', 'endedAt'])
           && d.keys().hasAll(['seq', 'from', 'to', 'km', 'dur', 'realDur', 'date'])
+
+          // original fields (unchanged)
           && d.seq is int && d.seq >= 1
           && d.from is string && d.from.size() >= 1 && d.from.size() <= 40
           && d.to is string && d.to.size() >= 1 && d.to.size() <= 40
@@ -21,13 +35,35 @@ service cloud.firestore {
           && d.km is int && d.km >= 0 && d.km <= 20100       // longest possible great-circle route
           && d.dur is string && d.dur.size() >= 1 && d.dur.size() <= 20
           && (d.realDur == null || (d.realDur is string && d.realDur.size() <= 20))
-          && d.date is string && d.date.matches('^[0-3][0-9]/[01][0-9]/20[0-9][0-9]$');
+          && d.date is string && d.date.matches('^[0-3][0-9]/[01][0-9]/20[0-9][0-9]$')
+
+          // revamp fields (optional)
+          && optional(d, 'module',    d.get('module', '') is string
+                                      && d.get('module', '').size() >= 1 && d.get('module', '').size() <= 40)
+          && optional(d, 'flightMin', d.get('flightMin', 0) is int
+                                      && d.get('flightMin', 0) >= 0 && d.get('flightMin', 0) <= 3000)
+          && optional(d, 'realMin',   d.get('realMin', 0) is int
+                                      && d.get('realMin', 0) >= 0 && d.get('realMin', 0) <= 3000)
+          && optional(d, 'startedAt', d.get('startedAt', null) is timestamp)
+          && optional(d, 'endedAt',   d.get('endedAt', null) is timestamp)
+          && (!('startedAt' in d) || !('endedAt' in d) || d.endedAt >= d.startedAt);
+    }
+
+    function validModule(id, d) {
+      return d.keys().hasOnly(['name']) && d.keys().hasAll(['name'])
+          && d.name is string && d.name.size() >= 1 && d.name.size() <= 40
+          && id == d.name;
     }
 
     match /flights/{flightId} {
       allow read: if true;
       allow create: if validFlight(request.resource.data);
       allow delete: if true;
+    }
+
+    match /modules/{moduleId} {
+      allow read: if true;
+      allow create: if validModule(moduleId, request.resource.data);
     }
     // Everything else is denied by default.
   }

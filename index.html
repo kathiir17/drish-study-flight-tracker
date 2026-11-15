@@ -463,7 +463,12 @@ async function saveToHistory(f, landT) {
       from:f.from.n, to:f.to.n, km:Math.round(f.km),
       dur:formatDur(f.km/900),
       realDur: f.sped ? formatDur((landT - f.startT)/3600000) : null,
-      date:ddmmyyyy(new Date(landT))
+      date:ddmmyyyy(new Date(landT)),
+      // summable numbers for stats (see REVAMP.md phase 0); realMin will exclude pauses
+      flightMin: Math.round(f.totalMs / 60000),
+      realMin: Math.round((landT - f.startT) / 60000),
+      startedAt: new Date(f.startT),
+      endedAt: new Date(landT)
     });
   } catch(e) {
     console.error(e);
