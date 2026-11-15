@@ -53,7 +53,12 @@ pick two cities, press fly, and study for as long as the flight takes.
 | `CLAUDE.md` | project notes for claude code. |
 
 dependencies, all loaded from cdns: firebase sdk 10.12.2 (gstatic), topojson-client
-and world-atlas (jsdelivr, for the country shapes).
+3.1.0 and world-atlas 2.0.2 (jsdelivr, for the country shapes). the jsdelivr files are
+pinned with integrity hashes, so upgrading one means updating its version and hash
+together.
+
+history entries come from a database anyone can add to, so they're always shown as
+plain text, never as html.
 
 ## data
 
@@ -102,6 +107,6 @@ named `index.html`.
   play then. the timer still keeps correct time and catches up (including saving a
   landed flight) as soon as the page is opened again.
 - **iphone silent switch** mutes the chimes.
-- **history shows city names as raw html.** since anyone can add a flight, someone
-  could plant markup in the list. to be fixed by escaping the text.
+- **anyone with the link can delete flights.** there's no sign-in, so the rules can't
+  tell drish apart from anyone else. fixing this needs some form of sign-in.
 - `ctx.roundRect` (hud boxes) needs safari 16+.
