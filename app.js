@@ -59,7 +59,7 @@ function findCity(name) { return CITIES.find(c => c.n === String(name).trim().to
 // R = baseR × zoom = the radius the map is projected at. Zoomed in, R > baseR and the
 // circle acts as a window onto a magnified globe, so the layout never shifts.
 let W = 0, H = 0, DPR = 1, CX = 0, CY = 0, baseR = 100, zoom = 1, R = 100;
-let rotX = 0.3, rotY = 0, vX = 0, vY = 0;
+let rotX = 0.3, rotY = 0;
 
 function ll2xyz(lat, lng) {
   const la = lat * Math.PI / 180, lo = lng * Math.PI / 180;
@@ -117,9 +117,9 @@ function resize() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   relayout(true);
 }
-function easeLayout() {
+function easeLayout(dt) {
   if (!target) return;
-  const k = reduceMotion.matches ? 1 : 0.14;
+  const k = reduceMotion.matches ? 1 : 1 - Math.exp(-dt / 0.12);
   CX += (target.cx - CX) * k; CY += (target.cy - CY) * k; baseR += (target.r - baseR) * k; R = baseR * zoom;
 }
 if (window.ResizeObserver) new ResizeObserver(() => relayout(false)).observe(panelEl);
@@ -147,6 +147,19 @@ function drawStars(t) {
 }
 
 let geo = null;
+let LAND = null;   // every country outline as 3d points [x,y,z, x,y,z, …], worked out once
+function landRings(features) {
+  const rings = [];
+  for (const f of features) {
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys) for (const ring of poly) {
+      const a = new Float64Array(ring.length * 3);
+      ring.forEach(([lng, lat], i) => { const v = ll2xyz(lat, lng); a[i*3] = v[0]; a[i*3+1] = v[1]; a[i*3+2] = v[2]; });
+      rings.push(a);
+    }
+  }
+  return rings;
+}
 // Country shapes from the CDN, pinned to exact versions with integrity hashes: the
 // browser refuses the file if its contents ever differ from what we checked. Upgrading
 // either means updating the version AND recomputing its hash.
@@ -159,7 +172,7 @@ let geo = null;
     fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json',
           { integrity: 'sha384-yOCJ+8ShBm8UDqtAVtAvxTDDf4gXo5edxl/YG0FmVC5OTmqVLl7utuVGBDEeZWHf' })
       .then(r => r.json())
-      .then(t => { geo = topojson.feature(t, t.objects.countries).features; })
+      .then(t => { geo = topojson.feature(t, t.objects.countries).features; LAND = landRings(geo); })
       .catch(e => console.error('country shapes failed to load', e));
   };
   document.head.appendChild(s);
@@ -198,32 +211,37 @@ function drawGlobe() {
   ctx.strokeStyle = 'rgba(150,190,255,0.07)'; ctx.lineWidth = 0.7;
   for (const line of GRATICULE) { strokePath(line); ctx.stroke(); }
 
-  if (geo) {
+  if (LAND) {
     // Countries are drawn by their near-side points (z > 0) and the canvas clip trims them
     // to the globe's circle, so zooming in works. Points on the far side of the planet are
     // pushed to the true horizon, so a country crossing it hugs the edge instead of being
-    // cut off with a straight line. Borders: near side only.
-    ctx.fillStyle = '#28524b'; ctx.strokeStyle = 'rgba(150,215,190,0.28)'; ctx.lineWidth = 0.6; ctx.lineJoin = 'round';
-    for (const f of geo) {
-      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-      for (const poly of polys) for (const ring of poly) {
-        const pts = ring.map(([lng, lat]) => projectLL(lat, lng));
-        if (!pts.some(p => p.z > 0)) continue;
-        ctx.beginPath();
-        pts.forEach((p, i) => {
-          let x = p.sx, y = p.sy;
-          if (p.z <= 0) { const d = Math.hypot(x - CX, y - CY) || 1; x = CX + (x - CX) / d * R; y = CY + (y - CY) / d * R; }
-          i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-        });
-        ctx.fill();
-        ctx.beginPath(); let pen = false;
-        for (const p of pts) {
-          if (p.z <= 0) { pen = false; continue; }
-          pen ? ctx.lineTo(p.sx, p.sy) : ctx.moveTo(p.sx, p.sy); pen = true;
-        }
-        ctx.stroke();
+    // cut off with a straight line. Borders: near side only. The rotation maths is
+    // project() written out inline, because it runs for ~10,000 points every frame.
+    const cY = Math.cos(rotY), sY = Math.sin(rotY), cX = Math.cos(rotX), sX = Math.sin(rotX);
+    const fill = new Path2D(), border = new Path2D();
+    for (const a of LAND) {
+      const n = a.length / 3;
+      let any = false;
+      for (let i = 0; i < n && !any; i++) {
+        const x = a[i*3], y = a[i*3+1], z = a[i*3+2];
+        if (y * sX + (-x * sY + z * cY) * cX > 0) any = true;
       }
+      if (!any) continue;                      // entirely on the far side
+      let pen = false;
+      for (let i = 0; i < n; i++) {
+        const x = a[i*3], y = a[i*3+1], z = a[i*3+2];
+        const x1 = x * cY + z * sY, z1 = -x * sY + z * cY;
+        const y2 = y * cX - z1 * sX, z2 = y * sX + z1 * cX;
+        let px = x1, py = y2;
+        if (z2 <= 0) { const d = Math.hypot(x1, y2) || 1; px = x1 / d; py = y2 / d; }
+        const sx = CX + px * R, sy = CY - py * R;
+        i ? fill.lineTo(sx, sy) : fill.moveTo(sx, sy);
+        if (z2 > 0) { pen ? border.lineTo(sx, sy) : border.moveTo(sx, sy); pen = true; } else pen = false;
+      }
+      fill.closePath();
     }
+    ctx.fillStyle = '#28524b'; ctx.fill(fill);
+    ctx.strokeStyle = 'rgba(150,215,190,0.28)'; ctx.lineWidth = 0.6; ctx.lineJoin = 'round'; ctx.stroke(border);
   }
   // shade the edge so it reads as a sphere, plus a soft highlight
   g = ctx.createRadialGradient(CX - baseR * 0.2, CY - baseR * 0.25, baseR * 0.5, CX, CY, baseR * 1.02);
@@ -252,7 +270,7 @@ function drawCities() {
   for (const c of CITIES) {
     const isFrom = ends.from === c, isTo = ends.to === c;
     const target = c === pressedCity ? 2.4 : c === hoverCity ? 2.0 : (isFrom || isTo) ? 1.6 : 1;
-    c.scale += (target - c.scale) * 0.25;
+    c.scale += (target - c.scale) * (1 - Math.exp(-frameDt / 0.06));
     const p = projectLL(c.lat, c.lng);
     if (!p.vis) continue;
     const r = 2.4 * c.scale;
@@ -304,14 +322,138 @@ function drawRoute(from, to, prog, withPlane) {
   ctx.restore();
 }
 
-// ── Touch, mouse and zoom ─────────────────────────────────
-// Pointer events cover mouse, trackpad and touch. One finger/mouse drags; two fingers
-// pinch; a tap that barely moves picks the nearest city.
+// ── Camera: turning and zooming the globe ─────────────────
+// All motion is time-based (same feel at 60 Hz or 120 Hz). The key piece is
+// solveRotation(): "which rotation puts this point of the Earth at this spot on
+// screen?". It powers three things:
+//   • dragging: the point you grabbed stays under your finger/cursor
+//   • zooming: the point under the cursor (or between your fingers) stays put
+//   • facing a route: put the route's midpoint at the centre (spot 0,0)
+// tests/behaviour.py checks it against project() for hundreds of random cases.
+const ROT_X_LIMIT = 1.4;                 // ~80° tilt either way: a soft stop at the poles
+const ZOOM_MIN = 1, ZOOM_MAX = 4;        // never smaller than the circle; up to 4x inside it
+const FOLLOW_AFTER_MS = 12000;           // in flight, drift back to the route after 12 s untouched
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const wrapAngle = a => Math.atan2(Math.sin(a), Math.cos(a));   // → (-π, π]
+
+const cam = {
+  vx: 0, vy: 0,          // momentum, radians per second (tilt, spin)
+  tZoom: 1,              // zoom we're gliding towards
+  anchor: null,          // { P, sx, sy }: keep world point P under screen spot (sx, sy) while zooming
+  auto: null,            // { rotX, rotY, zoom }: a glide the app started (facing a route)
+  lastInteract: 0,
+  samples: [],           // recent drag positions, for the flick speed on release
+};
+function setZoom(z) { zoom = clamp(z, ZOOM_MIN, ZOOM_MAX); R = baseR * zoom; }
+function interacted() { cam.auto = null; cam.lastInteract = performance.now(); }
+
+// Screen spot → point on the Earth (unit vector, world coordinates), or null if the spot
+// isn't on the globe. The exact inverse of project().
+function unproject(sx, sy) {
+  const x1 = (sx - CX) / R, y2 = (CY - sy) / R;
+  const d2 = x1 * x1 + y2 * y2;
+  if (d2 * zoom * zoom > 1) return null;           // outside the globe's circle
+  const z2 = Math.sqrt(Math.max(0, 1 - d2));
+  const cX = Math.cos(rotX), sX = Math.sin(rotX), cY = Math.cos(rotY), sY = Math.sin(rotY);
+  const y = y2 * cX + z2 * sX, z1 = -y2 * sX + z2 * cX;   // undo the tilt
+  return [x1 * cY - z1 * sY, y, x1 * sY + z1 * cY];        // undo the spin
+}
+
+// The rotation that puts world point P at screen offset (qx, qy) — measured from the
+// globe's centre in units of R — on the near side. Of the two answers, it returns the
+// one closest to the current view, with the tilt held within the pole limits.
+// Note: the globe only spins and tilts (never rolls), so a point near a pole can't be put
+// far to the left or right of centre (|qx| can't exceed the point's distance from the
+// axis); then it gives the closest reachable position.
+function solveRotation(P, qx, qy) {
+  const [x, y, z] = P;
+  const A = Math.hypot(x, z), phi = Math.atan2(z, x);
+  const a = Math.acos(clamp(qx / Math.max(A, 1e-9), -1, 1));
+  let best = null;
+  for (const Y of [phi + a, phi - a]) {
+    const z1 = -x * Math.sin(Y) + z * Math.cos(Y);
+    const B = Math.hypot(y, z1), psi = Math.atan2(z1, y);
+    const X = wrapAngle(Math.acos(clamp(qy / Math.max(B, 1e-9), -1, 1)) - psi);
+    const Xc = clamp(X, -ROT_X_LIMIT, ROT_X_LIMIT);
+    const dY = wrapAngle(Y - rotY);
+    const cost = Math.abs(dY) + Math.abs(Xc - rotX) + Math.abs(X - Xc) * 10;
+    if (!best || cost < best.cost) best = { cost, rotX: Xc, rotY: rotY + dY };
+  }
+  return best;
+}
+function applyRotation(s) { rotX = s.rotX; rotY = s.rotY; }
+
+// Keep the point under (sx, sy) fixed while zoom changes.
+function setAnchor(sx, sy) {
+  const P = unproject(sx, sy);
+  cam.anchor = P ? { P, sx, sy } : null;
+}
+function holdAnchor() {
+  if (!cam.anchor) return;
+  const { P, sx, sy } = cam.anchor;
+  applyRotation(solveRotation(P, (sx - CX) / R, (CY - sy) / R));
+}
+
+// ── Facing places ──
+function viewCentredOn(P, z) { const s = solveRotation(P, 0, 0); return { rotX: s.rotX, rotY: s.rotY, zoom: z }; }
+function faceCity(c) {
+  cam.auto = viewCentredOn(ll2xyz(c.lat, c.lng), Math.max(1, Math.min(cam.tZoom, 2)));
+}
+// Centre the route and zoom so it fills about three quarters of the circle. Routes too
+// long to fit on one side of the planet centre on the plane instead.
+function frameRoute(from, to, prog) {
+  const a = ll2xyz(from.lat, from.lng), b = ll2xyz(to.lat, to.lng);
+  const th = Math.acos(clamp(a[0]*b[0] + a[1]*b[1] + a[2]*b[2], -1, 1));   // angle between them
+  if (th < 2.0) {
+    cam.auto = viewCentredOn(slerp(a, b, 0.5), clamp(0.72 / Math.sin(th / 2 + 1e-6), ZOOM_MIN, ZOOM_MAX));
+  } else {
+    cam.auto = viewCentredOn(slerp(a, b, prog || 0), 1);
+  }
+}
+
+// ── Per-frame update ──
+function updateCamera(dt) {   // dt in seconds
+  const now = performance.now();
+  if (cam.auto && !dragging && !pinch) {
+    const k = reduceMotion.matches ? 1 : 1 - Math.exp(-dt / 0.35);   // ease out, settles in ~2 s
+    const dY = wrapAngle(cam.auto.rotY - rotY);
+    rotY += dY * k; rotX += (cam.auto.rotX - rotX) * k;
+    setZoom(zoom + (cam.auto.zoom - zoom) * k); cam.tZoom = zoom; cam.anchor = null;
+    if (Math.abs(dY) < 2e-3 && Math.abs(cam.auto.rotX - rotX) < 2e-3 && Math.abs(cam.auto.zoom - zoom) < 4e-3) {
+      rotY += wrapAngle(cam.auto.rotY - rotY); rotX = cam.auto.rotX; setZoom(cam.auto.zoom); cam.tZoom = zoom;   // within a hair: settle exactly
+      cam.auto = null;
+    }
+    cam.vx = cam.vy = 0;
+    return;
+  }
+  if (!dragging && !pinch) {
+    // momentum after a flick, fading smoothly
+    rotY += cam.vy * dt; rotX += cam.vx * dt;
+    const decay = Math.exp(-dt / 0.35);
+    cam.vx *= decay; cam.vy *= decay;
+    if (Math.abs(rotX) > ROT_X_LIMIT) { rotX = Math.sign(rotX) * ROT_X_LIMIT; cam.vx = 0; }
+    // zoom glides to its target (scroll wheel / trackpad), holding the spot under the cursor
+    if (Math.abs(cam.tZoom - zoom) > 1e-4) {
+      const k = reduceMotion.matches ? 1 : 1 - Math.exp(-dt / 0.09);
+      setZoom(zoom + (cam.tZoom - zoom) * k);
+      holdAnchor();
+    } else if (zoom !== cam.tZoom) { setZoom(cam.tZoom); holdAnchor(); cam.anchor = null; }
+  }
+  // in flight and left alone: drift back to the route
+  if (flight && !flight.landed && !dragging && !pinch && !cam.auto && now - cam.lastInteract > FOLLOW_AFTER_MS
+      && Math.abs(cam.vx) + Math.abs(cam.vy) < 0.01 && Math.abs(cam.tZoom - zoom) < 1e-3) {
+    frameRoute(flight.from, flight.to, flightProgress(Date.now()));
+    cam.lastInteract = now;
+  }
+}
+
+// ── Touch, mouse and trackpad ──
+// Pointer events cover mouse, pen and touch. One pointer drags (the grabbed point stays
+// under it); two pinch and pan together; a tap that barely moves picks the nearest city.
 const pointers = new Map();
-let dragging = false, mx = 0, my = 0, pinch = null, press = null;
+let dragging = false, pinch = null, press = null, grab = null, lastPos = null;
 let hoverCity = null, pressedCity = null;
-const ZOOM_MIN = 1, ZOOM_MAX = 4;   // never smaller than the circle; up to 4x inside it
-function setZoom(z) { zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)); R = baseR * zoom; }
+let mouseX = 0, mouseY = 0;
 
 function hitCity(x, y, touch) {
   const max = touch ? 24 : 14;
@@ -324,22 +466,40 @@ function hitCity(x, y, touch) {
   }
   return best;
 }
-function pinchDist() { const [a, b] = [...pointers.values()]; return Math.hypot(a.x - b.x, a.y - b.y); }
+function twoPointers() { const [a, b] = [...pointers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; }
+function sampleDrag() {
+  const t = performance.now();
+  cam.samples.push({ t, rx: rotX, ry: rotY });
+  while (cam.samples.length > 2 && t - cam.samples[0].t > 100) cam.samples.shift();
+}
+// Drag the globe so that `grab` (a point on the Earth) sits under screen spot (x, y).
+// If the spot is off the globe, the point is held at the circle's edge.
+function dragTo(x, y) {
+  let qx = (x - CX) / R, qy = (CY - y) / R;
+  const lim = 0.999 / zoom, d = Math.hypot(qx, qy);
+  if (d > lim) { qx *= lim / d; qy *= lim / d; }
+  applyRotation(solveRotation(grab, qx, qy));
+}
 
 canvas.addEventListener('pointerdown', e => {
   try { canvas.setPointerCapture(e.pointerId); } catch(err) {}  // keeps the drag if the finger leaves the canvas
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  closeAC();
+  interacted(); closeAC();
+  cam.vx = cam.vy = 0; cam.anchor = null; cam.tZoom = zoom; cam.samples = [];
   if (pointers.size === 1) {
-    dragging = true; mx = e.clientX; my = e.clientY; vX = vY = 0;
+    dragging = true; lastPos = { x: e.clientX, y: e.clientY };
+    grab = unproject(e.clientX, e.clientY);       // null when grabbing the sky
     pressedCity = hitCity(e.clientX, e.clientY, e.pointerType !== 'mouse');
     press = { x: e.clientX, y: e.clientY, moved: false, city: pressedCity };
   } else if (pointers.size === 2) {
-    pinch = { d0: pinchDist(), z0: zoom }; press = null; pressedCity = null; dragging = false;
+    const tp = twoPointers();
+    pinch = { d0: tp.d, z0: zoom, P: unproject(tp.mx, tp.my) };
+    press = null; pressedCity = null; dragging = false;
   }
   canvas.style.cursor = 'grabbing';
 });
 canvas.addEventListener('pointermove', e => {
+  mouseX = e.clientX; mouseY = e.clientY;
   if (!pointers.has(e.pointerId)) {      // mouse hovering, no button down
     if (e.pointerType === 'mouse') {
       hoverCity = hitCity(e.clientX, e.clientY, false);
@@ -348,24 +508,40 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (pinch && pointers.size === 2) { setZoom(pinch.z0 * pinchDist() / pinch.d0); return; }
+  interacted();
+  if (pinch && pointers.size === 2) {   // pinch: zoom with the fingers, and pan with their midpoint
+    const tp = twoPointers();
+    setZoom(pinch.z0 * tp.d / pinch.d0); cam.tZoom = zoom;
+    if (pinch.P) applyRotation(solveRotation(pinch.P, (tp.mx - CX) / R, (CY - tp.my) / R));
+    return;
+  }
   if (!dragging) return;
   if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) { press.moved = true; pressedCity = null; }
-  const k = 0.005 / Math.sqrt(zoom);
-  vY = (e.clientX - mx) * k; vX = (e.clientY - my) * k;
-  rotY += vY; rotX += vX;
-  rotX = Math.max(-1.4, Math.min(1.4, rotX));
-  mx = e.clientX; my = e.clientY;
+  if (grab) dragTo(e.clientX, e.clientY);
+  else {                                 // grabbed the sky: turn by distance moved
+    const k = 1 / R;
+    rotY += (e.clientX - lastPos.x) * k; rotX = clamp(rotX + (e.clientY - lastPos.y) * k, -ROT_X_LIMIT, ROT_X_LIMIT);
+  }
+  lastPos = { x: e.clientX, y: e.clientY };
+  sampleDrag();
 });
 function pointerEnd(e) {
   if (!pointers.has(e.pointerId)) return;
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
   if (pointers.size === 1) {            // one finger left after a pinch: carry on dragging from it
-    const [p] = pointers.values(); dragging = true; mx = p.x; my = p.y; vX = vY = 0;
+    const [p] = pointers.values();
+    dragging = true; lastPos = { x: p.x, y: p.y }; grab = unproject(p.x, p.y); cam.samples = [];
   }
   if (pointers.size === 0) {
-    dragging = false;
+    // flick: carry on at the speed of the last ~100 ms of the drag (none if it had stopped)
+    const s = cam.samples, now = performance.now();
+    if (dragging && s.length >= 2 && now - s[s.length - 1].t < 60) {
+      const a = s[0], b = s[s.length - 1], dt = (b.t - a.t) / 1000;
+      if (dt > 0.008) { cam.vx = (b.rx - a.rx) / dt; cam.vy = wrapAngle(b.ry - a.ry) / dt; }
+      const max = 6; cam.vx = clamp(cam.vx, -max, max); cam.vy = clamp(cam.vy, -max, max);
+    }
+    dragging = false; grab = null;
     if (e.type === 'pointerup' && press && !press.moved && press.city) onCityTap(press.city);
     press = null; pressedCity = null;
     canvas.style.cursor = 'grab';
@@ -375,15 +551,24 @@ canvas.addEventListener('pointerup', pointerEnd);
 canvas.addEventListener('pointercancel', pointerEnd);
 canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !pointers.size) hoverCity = null; });
 
-// Scroll wheel / trackpad zoom. Chrome sends trackpad pinches as ctrl+wheel; Safari sends
-// its own gesture events instead (ignored during a touch pinch, which pointers handle).
+// Scroll wheel / trackpad: zoom glides towards the cursor. Chrome sends trackpad pinches
+// as ctrl+wheel; Safari sends its own gesture events (ignored during a touch pinch,
+// which the pointer code handles).
 canvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  setZoom(zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+  e.preventDefault(); interacted();
+  const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+  cam.tZoom = clamp(cam.tZoom * Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0022)), ZOOM_MIN, ZOOM_MAX);
+  setAnchor(e.clientX, e.clientY);
 }, { passive: false });
 let gestureZoom0 = 1;
-document.addEventListener('gesturestart', e => { e.preventDefault(); gestureZoom0 = zoom; });
-document.addEventListener('gesturechange', e => { e.preventDefault(); if (pointers.size < 2 && e.target === canvas) setZoom(gestureZoom0 * e.scale); });
+document.addEventListener('gesturestart', e => { e.preventDefault(); gestureZoom0 = cam.tZoom; });
+document.addEventListener('gesturechange', e => {
+  e.preventDefault();
+  if (pointers.size >= 2 || e.target !== canvas) return;
+  interacted();
+  cam.tZoom = clamp(gestureZoom0 * e.scale, ZOOM_MIN, ZOOM_MAX);
+  setAnchor(e.clientX ?? mouseX, e.clientY ?? mouseY);
+});
 document.addEventListener('gestureend', e => e.preventDefault());
 
 // ── Audio ─────────────────────────────────────────────────
@@ -560,6 +745,8 @@ function launch(s, restored) {
   chosenSpeed = flight.speed; showSpeed(chosenSpeed);
   persistFlight();
   if (!restored) playChime('takeoff');
+  frameRoute(flight.from, flight.to, flightProgress(now));
+  cam.lastInteract = performance.now();
   renderState();
   tick();
 }
@@ -753,6 +940,12 @@ function onCityTap(c) {
   inpTo.value = sel.to ? sel.to.n : '';
   $('plan-msg').textContent = '';
   updatePlan();
+  if (sel.from && sel.to) frameRoute(sel.from, sel.to);   // a tapped city is already in view; a full route gets framed
+}
+// After choosing a city by typing: show the whole route, or turn to the city.
+function faceChoice(c) {
+  if (sel.from && sel.to && sel.from !== sel.to) frameRoute(sel.from, sel.to);
+  else if (c) faceCity(c);
 }
 
 $('btn-swap').addEventListener('click', () => {
@@ -806,11 +999,17 @@ function pickCity(c) {
   sel[inp === inpFrom ? 'from' : 'to'] = c;
   closeAC();
   updatePlan();
+  faceChoice(c);
   if (inp === inpFrom && !sel.to) inpTo.focus();
 }
 [inpFrom, inpTo].forEach(inp => {
   const key = inp === inpFrom ? 'from' : 'to';
-  inp.addEventListener('input', () => { sel[key] = findCity(inp.value) || null; $('plan-msg').textContent = ''; updatePlan(); openAC(inp); });
+  inp.addEventListener('input', () => {
+    const before = sel[key];
+    sel[key] = findCity(inp.value) || null;
+    $('plan-msg').textContent = ''; updatePlan(); openAC(inp);
+    if (sel[key] && sel[key] !== before) faceChoice(sel[key]);
+  });
   inp.addEventListener('focus', () => { if (inp.value) openAC(inp); });
   inp.addEventListener('blur', () => setTimeout(closeAC, 120));
   inp.addEventListener('keydown', e => {
@@ -870,7 +1069,7 @@ btnStop.addEventListener('click', () => {
 });
 
 // after landing
-$('btn-onward').addEventListener('click', () => { const next = flight.to; stopFlight(); sel.from = next; sel.to = null; inpTo.value = ''; renderState(); inpTo.focus(); });
+$('btn-onward').addEventListener('click', () => { const next = flight.to; stopFlight(); sel.from = next; sel.to = null; inpTo.value = ''; renderState(); faceCity(next); inpTo.focus(); });
 $('btn-new').addEventListener('click', () => { stopFlight(); sel.from = sel.to = null; inpFrom.value = inpTo.value = ''; renderState(); });
 
 // tabs
@@ -974,12 +1173,13 @@ async function renderHistory() {
 }
 
 // ── Start-up ──────────────────────────────────────────────
+let lastFrame = 0, frameDt = 1 / 60;
 function loop(t) {
-  easeLayout();
-  if (!dragging && !pinch) {
-    vX *= 0.92; vY *= 0.92; rotY += vY; rotX += vX;
-    rotX = Math.max(-1.4, Math.min(1.4, rotX));
-  }
+  t = t || performance.now();
+  frameDt = lastFrame ? Math.min(0.1, (t - lastFrame) / 1000) : 1 / 60;   // seconds since last frame
+  lastFrame = t;
+  easeLayout(frameDt);
+  updateCamera(frameDt);
   ctx.clearRect(0, 0, W, H);
   drawStars(t || 0);
   drawGlobe();

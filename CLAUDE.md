@@ -75,14 +75,17 @@ The filename must stay `index.html` for Pages to serve it.
 ## Gotchas
 - Globe math is fiddly. `ll2xyz` negates longitude to fix a mirrored map, and drag signs
   are matched to that. Don't "tidy" these without testing orientation and drag direction.
-- Fly-to-city was attempted three times and always landed wrong. If retried, derive the
-  target rotation from `project()` and verify with a debug readout.
+- Camera (app.js "Camera" section): `solveRotation(P, qx, qy)` gives the rotation that puts
+  world point P at a screen offset; `unproject()` is project()'s exact inverse. Dragging,
+  zoom-to-cursor, pinch and facing routes (`frameRoute`, `faceCity`) all use them.
+  tests/behaviour.py checks both against project() on hundreds of random cases. The globe
+  only spins and tilts (no roll), so points near a pole can't reach far left/right.
+  All motion is time-based (`frameDt`); never use per-frame constants.
 - Zoom keeps the globe's circle fixed (`baseR`) and magnifies inside it (`R = baseR × zoom`,
   zoom 1–4). `project().vis` = near side AND inside the circle; drawGlobe clips to `baseR`.
   The panel slims (332 → 296px) in flight via `body.in-flight`.
 - Country fills push far-side points to the globe's edge (so shapes crossing the edge hug
   it); borders are drawn on the near side only.
-- The globe does not turn to face the chosen route (see REVAMP.md, parked).
 
 ## Known limitations
 - The globe needs jsdelivr, so the page doesn't fully work offline (data is safe).

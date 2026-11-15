@@ -90,12 +90,12 @@ manifest, split into index.html / styles.css / app.js. original brief below.
 
 ## phase 2 — core flight upgrades
 
-- **smooth globe motion.** zoom and drag feel jumpy ("comical"): make zoom glide to its
+- **smooth globe motion** (done). zoom and drag feel jumpy ("comical"): make zoom glide to its
   target instead of stepping per scroll event, zoom towards the point under the
   cursor/fingers, keep the point under the finger under it while dragging, frame-rate
   independent momentum, a soft stop at the poles, and a faster draw (precompute country
   points) so nothing drops frames. measure frame rate with playwright before and after.
-- **turn the globe to face the route** (moved here from parked, same maths as above):
+- **turn the globe to face the route** (done; moved here from parked, same maths as above):
   derive the target rotation from `project()`, glide to it, verify the route's midpoint
   lands at the centre automatically.
 
@@ -128,11 +128,8 @@ manifest, split into index.html / styles.css / app.js. original brief below.
 
 ## parked (don't start without kdot's go-ahead)
 
-- **turn the globe to face the route.** in phase 1 the globe stays where she left it, so
-  a route over the far side is hard to see until she drags. same maths as below.
-- **plane-down view.** needs reliable "centre the globe on a lat/lng" maths. fly-to-city
-  failed three times: derive the target rotation from `project()` and verify with a debug
-  readout. solve it once and reuse it.
+- **plane-down view.** the "centre the globe on a lat/lng" maths is now solved and tested
+  (`solveRotation`), so this is unblocked when kdot wants it.
 - **layovers and transits.** turns a flight into multiple legs, a real data-model change.
   pause covers most of the long-haul need for now.
 - **to-do list.** fully separate: its own collection, rules and screen.

@@ -49,6 +49,8 @@ with sync_playwright() as p:
     x, y, _ = city_xy(page, "mexico city"); page.mouse.click(x, y)
     ok(page.evaluate("sel.to && sel.to.n") == "mexico city", "second click sets to")
     ok("km" in page.inner_text("#route-preview") and "of study" in page.inner_text("#route-preview"), "preview shows distance and time: " + page.inner_text("#route-preview"))
+    page.wait_for_timeout(2500)   # picking a full route glides the globe to frame it
+    x, y, _ = city_xy(page, "mexico city")
     page.mouse.move(x + 1, y); page.wait_for_timeout(200)
     ok(page.evaluate("hoverCity && hoverCity.n") == "mexico city", "hover detects the city under the mouse")
     page.click("#btn-swap")
@@ -114,6 +116,87 @@ with sync_playwright() as p:
     ok(not errs, "no console errors: " + str(errs))
     ctx.close()
 
+    print("camera maths")
+    ctx, page, errs = new_page(b, viewport={"width": 1440, "height": 900})
+    page.goto(BASE); page.wait_for_timeout(1500)
+    worst = page.evaluate("""(() => {
+      let worst = 0, n = 0;
+      for (let i = 0; i < 400; i++) {
+        rotX = (Math.random() * 2 - 1) * 1.2; rotY = Math.random() * 20 - 10; setZoom(1 + Math.random() * 3);
+        const lat = Math.random() * 140 - 70, lng = Math.random() * 360 - 180, P = ll2xyz(lat, lng);
+        const r = Math.random() * 0.8 / zoom, ang = Math.random() * 6.283;
+        const qx = r * Math.cos(ang), qy = r * Math.sin(ang);
+        if (Math.abs(qx) > Math.hypot(P[0], P[2]) * 0.98) continue;   // unreachable without rolling the globe
+        const sol = solveRotation(P, qx, qy);
+        if (Math.abs(sol.rotX) >= 1.399) continue;        // pole limit reached: allowed to be off
+        rotX = sol.rotX; rotY = sol.rotY;
+        const p = project(...P);
+        worst = Math.max(worst, Math.hypot(p.sx - (CX + qx * R), p.sy - (CY - qy * R)), p.vis ? 0 : 999); n++;
+      }
+      return [worst, n];
+    })()""")
+    ok(worst[0] < 0.01 and worst[1] > 150, f"solveRotation lands the point exactly ({worst[1]} random cases, worst {worst[0]:.5f}px)")
+    worst = page.evaluate("""(() => {
+      let worst = 0;
+      for (let i = 0; i < 300; i++) {
+        rotX = (Math.random() * 2 - 1) * 1.3; rotY = Math.random() * 20 - 10; setZoom(1 + Math.random() * 3);
+        const sx = CX + (Math.random() * 2 - 1) * baseR * 0.7, sy = CY + (Math.random() * 2 - 1) * baseR * 0.7;
+        const P = unproject(sx, sy); if (!P) continue;
+        const p = project(...P); worst = Math.max(worst, Math.hypot(p.sx - sx, p.sy - sy));
+      }
+      return worst;
+    })()""")
+    ok(worst < 0.01, f"unproject is the exact inverse of project (worst {worst:.5f}px)")
+
+    print("mac: grabbing, zooming to the cursor, facing routes")
+    page.evaluate("rotX = 0.3; rotY = 0; setZoom(1); cam.tZoom = 1; cam.auto = null")
+    page.wait_for_timeout(100)
+    sx, sy = page.evaluate("[CX + 60, CY - 40]")
+    P = page.evaluate(f"unproject({sx}, {sy})")
+    page.mouse.move(sx, sy); page.mouse.down()
+    for i in range(1, 21): page.mouse.move(sx + i * 9, sy + i * 4)
+    off = page.evaluate(f"(() => {{ const p = project(...{P}); return Math.hypot(p.sx - {sx + 180}, p.sy - {sy + 80}); }})()")
+    page.mouse.up()
+    ok(off < 1.5, f"the grabbed point stays under the cursor while dragging (off by {off:.2f}px)")
+    page.evaluate("cam.vx = cam.vy = 0")
+    ax, ay = page.evaluate("[CX - 120, CY + 90]")
+    A = page.evaluate(f"unproject({ax}, {ay})")
+    page.mouse.move(ax, ay)
+    for _ in range(6): page.mouse.wheel(0, -120); page.wait_for_timeout(16)
+    page.wait_for_timeout(1500)
+    off = page.evaluate(f"(() => {{ const p = project(...{A}); return Math.hypot(p.sx - {ax}, p.sy - {ay}); }})()")
+    ok(page.evaluate("zoom") > 2 and off < 1.5, f"zoom glides in towards the cursor, the point under it stays put (zoom {page.evaluate('zoom'):.2f}, off by {off:.2f}px)")
+    steps = page.evaluate("""(async () => {
+      cam.tZoom = 1; cam.anchor = null; const zs = [];
+      for (let i = 0; i < 20; i++) { await new Promise(r => requestAnimationFrame(r)); zs.push(zoom); }
+      return zs; })()""")
+    moving = sum(1 for i in range(len(steps) - 1) if abs(steps[i+1] - steps[i]) > 1e-3)
+    ok(moving >= 6 and steps[-1] < steps[0], f"zoom glides over many frames, not one jump ({moving} frames of movement)")
+
+    for frm, to in [("london", "paris"), ("london", "tokyo"), ("sydney", "los angeles"), ("anchorage", "cape town")]:
+        page.evaluate("stopFlight(); sel.from = sel.to = null; cam.auto = null")
+        page.fill("#inp-from", frm); page.fill("#inp-to", to)
+        page.wait_for_timeout(3500)
+        res = page.evaluate(f"""(() => {{
+          const a = ll2xyz(findCity('{frm}').lat, findCity('{frm}').lng), b = ll2xyz(findCity('{to}').lat, findCity('{to}').lng);
+          const th = Math.acos(a[0]*b[0] + a[1]*b[1] + a[2]*b[2]);
+          const m = project(...slerp(a, b, 0.5)), pa = project(...a), pb = project(...b);
+          return {{ th, off: Math.hypot(m.sx - CX, m.sy - CY), ends: pa.vis && pb.vis, zoom, settled: !cam.auto }};
+        }})()""")
+        if res["th"] < 2.0:
+            ok(res["settled"] and res["off"] < 2 and res["ends"], f"{frm} → {to}: route centred (off {res['off']:.1f}px), both ends visible, zoom {res['zoom']:.2f}")
+        else:
+            ok(res["settled"], f"{frm} → {to}: too long for one side; centred on the plane's position instead")
+    page.evaluate("stopFlight(); sel.from = sel.to = null")
+    page.fill("#inp-from", "london"); page.fill("#inp-to", "paris")
+    page.click("#btn-fly"); page.wait_for_timeout(2500)
+    page.evaluate("rotY += 1.2; cam.lastInteract = performance.now() - 13000")
+    page.wait_for_timeout(3500)
+    off = page.evaluate("(() => { const a = ll2xyz(findCity('london').lat, findCity('london').lng), b = ll2xyz(findCity('paris').lat, findCity('paris').lng); const m = project(...slerp(a, b, 0.5)); return Math.hypot(m.sx - CX, m.sy - CY); })()")
+    ok(off < 3, f"in flight, left alone for 12 s, the globe drifts back to the route (off {off:.1f}px)")
+    ok(not errs, "no console errors: " + str(errs))
+    ctx.close()
+
     print("ipad: touch")
     ctx, page, errs = new_page(b, viewport={"width": 1180, "height": 820}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page.goto(BASE); page.wait_for_timeout(1500)
@@ -169,7 +252,7 @@ with sync_playwright() as p:
     ok(hidden > 0, f"near-side cities outside the circle are hidden and untappable ({hidden})")
     page.screenshot(path="/tmp/zoomed.png")
     for _ in range(20): page.mouse.wheel(0, 400)
-    page.wait_for_timeout(200)
+    page.wait_for_timeout(1500)
     ok(page.evaluate("zoom") == 1, "can't zoom out smaller than the circle")
     cx_plan = page.evaluate("CX")
     page.fill("#inp-from", "london"); page.fill("#inp-to", "paris"); page.click("#btn-fly"); page.wait_for_timeout(1200)

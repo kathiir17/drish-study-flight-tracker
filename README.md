@@ -18,8 +18,11 @@ pick two cities, press fly, and study for as long as the flight takes.
   the distance and how long the flight will be before she takes off. 70 cities.
 - **flight time:** great-circle distance at 900 km/h, so a flight lasts `km / 900`
   hours. london → paris is ~23 min; london → sydney is ~19 h.
-- **the globe:** drag (mouse or finger) to turn it; scroll, pinch or trackpad-pinch to
-  zoom. the route is a dashed arc that fills in amber behind the plane.
+- **the globe:** drag (mouse or finger) to turn it, and the spot you grab stays under
+  your finger; flick it to spin. scroll, pinch or trackpad-pinch to zoom in towards
+  that spot (the globe's outline stays the same size). choosing a route turns the globe
+  to frame it; mid-flight, leave it alone for 12 seconds and it drifts back to the route.
+  the route is a dashed arc that fills in amber behind the plane.
 - **in flight:** the card shows the time left, distance flown and to go, and the
   pomodoro ring (blue = focus, amber = break). messages at the top change at takeoff,
   25%, halfway, 75% and landing. stopping needs two taps, and a stopped flight isn't saved.
@@ -110,8 +113,6 @@ named `index.html`.
 
 ## known limitations
 
-- **the globe doesn't turn to face your route** yet, so a route over the far side needs a
-  drag to see.
 - **the globe needs the internet:** country shapes come from a cdn, so the page doesn't
   load fully offline (saved flights are still safe).
 - **iphone, locked or in another app:** ios pauses the page completely, so chimes can't
